@@ -1,0 +1,51 @@
+const express = require('express');
+const cors = require('cors');
+const { initDatabase } = require('./config/db');
+const { connectRedis } = require('./config/redis');
+const { apiLimiter } = require('./middleware/rateLimit');
+
+const userRoutes = require('./routes/user');
+const questionnaireRoutes = require('./routes/questionnaire');
+const responseRoutes = require('./routes/response');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+app.use(apiLimiter);
+
+app.use('/api/user', userRoutes);
+app.use('/api/questionnaire', questionnaireRoutes);
+app.use('/api/response', responseRoutes);
+
+app.get('/api/health', (req, res) => {
+  res.json({ code: 200, message: '服务运行正常', timestamp: new Date().toISOString() });
+});
+
+app.use((req, res) => {
+  res.status(404).json({ code: 404, message: '接口不存在' });
+});
+
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({ code: 500, message: '服务器内部错误' });
+});
+
+async function startServer() {
+  try {
+    await initDatabase();
+    await connectRedis();
+    
+    app.listen(PORT, () => {
+      console.log(`Server is running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
