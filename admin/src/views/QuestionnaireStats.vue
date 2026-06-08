@@ -215,21 +215,30 @@ const fetchStats = async () => {
       getQuestionnaireStats(id)
     ])
 
-    if (detailRes.success) {
-      questionnaire.id = detailRes.data.id
-      questionnaire.title = detailRes.data.title
+    if (detailRes.code === 200) {
+      questionnaire.id = detailRes.data.questionnaire.id
+      questionnaire.title = detailRes.data.questionnaire.title
     }
 
-    if (statsRes.success) {
+    if (statsRes.code === 200) {
       stats.totalResponses = statsRes.data.totalResponses || 0
-      stats.questions = statsRes.data.questions || []
+      stats.questions = statsRes.data.stats?.map(s => ({
+        id: s.questionId,
+        title: s.questionTitle,
+        type: s.type,
+        options: s.options,
+        responses: s.answers?.map((a, idx) => ({
+          value: a,
+          createdAt: '-'
+        })) || []
+      })) || []
 
       await nextTick()
 
       stats.questions.forEach((question, index) => {
         if (question.type === 'radio' || question.type === 'checkbox') {
           const chartData = question.options?.map(opt => ({
-            name: opt.name,
+            name: opt.option,
             count: opt.count || 0
           })) || []
 

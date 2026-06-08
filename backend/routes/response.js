@@ -128,7 +128,17 @@ router.get('/:id', authMiddleware, async (req, res) => {
     );
     
     responses.forEach(r => {
-      r.answers = JSON.parse(r.answers);
+      if (typeof r.answers === 'string') {
+        r.answers = JSON.parse(r.answers);
+      }
+      const answerMap = {};
+      if (r.answers && Array.isArray(r.answers)) {
+        r.answers.forEach(a => {
+          answerMap[a.question_id] = a.answer;
+        });
+      }
+      r.answers = answerMap;
+      r.createdAt = r.submit_time;
     });
     
     res.json({

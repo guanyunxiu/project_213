@@ -249,10 +249,14 @@ router.get('/:id/stats', authMiddleware, async (req, res) => {
     for (const q of questions) {
       let options = [];
       if (q.options) {
-        try {
-          options = JSON.parse(q.options);
-        } catch (e) {
-          options = [];
+        if (typeof q.options === 'string') {
+          try {
+            options = JSON.parse(q.options);
+          } catch (e) {
+            options = [];
+          }
+        } else {
+          options = q.options;
         }
       }
       

@@ -94,8 +94,12 @@ const pagination = reactive({
 
 const formatAnswer = (answer, type) => {
   if (!answer) return '-'
-  if (type === 'checkbox' && Array.isArray(answer)) {
-    return answer.join('、')
+  if (type === 'checkbox') {
+    if (Array.isArray(answer)) {
+      return answer.join('、')
+    } else if (typeof answer === 'string') {
+      return answer.split(',').filter(Boolean).join('、')
+    }
   }
   return answer
 }
