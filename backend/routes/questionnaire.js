@@ -99,7 +99,13 @@ router.get('/:id', authMiddleware, async (req, res) => {
     
     questions.forEach(q => {
       if (q.options) {
-        q.options = JSON.parse(q.options);
+        try {
+          q.options = JSON.parse(q.options);
+        } catch (e) {
+          q.options = [];
+        }
+      } else {
+        q.options = [];
       }
     });
     
@@ -184,6 +190,136 @@ router.put('/:id', authMiddleware, async (req, res) => {
   }
 });
 
+router.put('/:id/status', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const userId = req.user.id;
+    
+    const [questionnaires] = await pool.execute(
+      'SELECT id FROM questionnaires WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+    
+    if (questionnaires.length === 0) {
+      return res.status(404).json({ code: 404, message: '问卷不存在' });
+    }
+    
+    await pool.execute(
+      'UPDATE questionnaires SET status = ? WHERE id = ?',
+      [status ? 1 : 0, id]
+    );
+    
+    res.json({
+      code: 200,
+      message: '状态更新成功'
+    });
+  } catch (error) {
+    console.error('Update status error:', error);
+    res.status(500).json({ code: 500, message: '状态更新失败' });
+  }
+});
+
+router.get('/:id/stats', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    
+    const [questionnaires] = await pool.execute(
+      'SELECT id, title FROM questionnaires WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+    
+    if (questionnaires.length === 0) {
+      return res.status(404).json({ code: 404, message: '问卷不存在' });
+    }
+    
+    const [questions] = await pool.execute(
+      'SELECT id, title, type, options FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
+      [id]
+    );
+    
+    const [responseCount] = await pool.execute(
+      'SELECT COUNT(*) as total FROM responses WHERE questionnaire_id = ?',
+      [id]
+    );
+    
+    const stats = [];
+    
+    for (const q of questions) {
+      let options = [];
+      if (q.options) {
+        try {
+          options = JSON.parse(q.options);
+        } catch (e) {
+          options = [];
+        }
+      }
+      
+      if (q.type === 'radio' || q.type === 'checkbox') {
+        const [answers] = await pool.execute(
+          'SELECT answer FROM response_answers WHERE question_id = ?',
+          [q.id]
+        );
+        
+        const optionStats = options.map(opt => ({
+          option: opt,
+          count: 0,
+          percentage: 0
+        }));
+        
+        answers.forEach(a => {
+          const answerValues = a.answer ? a.answer.split(',') : [];
+          answerValues.forEach(val => {
+            const idx = optionStats.findIndex(os => os.option === val);
+            if (idx !== -1) {
+              optionStats[idx].count++;
+            }
+          });
+        });
+        
+        const total = responseCount[0].total;
+        optionStats.forEach(os => {
+          os.percentage = total > 0 ? ((os.count / total) * 100).toFixed(1) : 0;
+        });
+        
+        stats.push({
+          questionId: q.id,
+          questionTitle: q.title,
+          type: q.type,
+          options: optionStats,
+          totalResponses: total
+        });
+      } else {
+        const [answers] = await pool.execute(
+          'SELECT answer FROM response_answers WHERE question_id = ? ORDER BY id DESC LIMIT 100',
+          [q.id]
+        );
+        
+        stats.push({
+          questionId: q.id,
+          questionTitle: q.title,
+          type: q.type,
+          answers: answers.map(a => a.answer).filter(a => a),
+          totalResponses: responseCount[0].total
+        });
+      }
+    }
+    
+    res.json({
+      code: 200,
+      data: {
+        questionnaire: questionnaires[0],
+        totalResponses: responseCount[0].total,
+        stats
+      }
+    });
+  } catch (error) {
+    console.error('Get stats error:', error);
+    res.status(500).json({ code: 500, message: '获取统计数据失败' });
+  }
+});
+
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
@@ -230,7 +366,13 @@ router.get('/public/:id', async (req, res) => {
     
     questions.forEach(q => {
       if (q.options) {
-        q.options = JSON.parse(q.options);
+        try {
+          q.options = JSON.parse(q.options);
+        } catch (e) {
+          q.options = [];
+        }
+      } else {
+        q.options = [];
       }
     });
     

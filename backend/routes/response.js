@@ -91,7 +91,7 @@ router.post('/:id', preventDuplicateSubmit, async (req, res) => {
   }
 });
 
-router.get('/questionnaire/:id', authMiddleware, async (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const page = parseInt(req.query.page) || 1;
@@ -146,148 +146,290 @@ router.get('/questionnaire/:id', authMiddleware, async (req, res) => {
   }
 });
 
-router.get('/questionnaire/:id/stats', authMiddleware, async (req, res) => {
+async function getResponseList(id, page, pageSize, userId) {
+  const offset = (page - 1) * pageSize;
+  
+  const [questionnaires] = await pool.execute(
+    'SELECT id FROM questionnaires WHERE id = ? AND user_id = ?',
+    [id, userId]
+  );
+  
+  if (questionnaires.length === 0) {
+    return { error: '问卷不存在', status: 404 };
+  }
+  
+  const [responses] = await pool.execute(
+    `SELECT r.id, r.respondent_ip, r.submit_time,
+     JSON_ARRAYAGG(
+       JSON_OBJECT('question_id', ra.question_id, 'answer', ra.answer)
+     ) as answers
+     FROM responses r
+     LEFT JOIN response_answers ra ON r.id = ra.response_id
+     WHERE r.questionnaire_id = ?
+     GROUP BY r.id
+     ORDER BY r.submit_time DESC
+     LIMIT ${pageSize} OFFSET ${offset}`,
+    [id]
+  );
+  
+  const [countResult] = await pool.execute(
+    'SELECT COUNT(*) as total FROM responses WHERE questionnaire_id = ?',
+    [id]
+  );
+  
+  responses.forEach(r => {
+    r.answers = JSON.parse(r.answers);
+  });
+  
+  return {
+    data: {
+      list: responses,
+      total: countResult[0].total,
+      page: page,
+      pageSize: pageSize
+    }
+  };
+}
+
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const result = await getResponseList(id, page, pageSize, req.user.id);
     
-    const [questionnaires] = await pool.execute(
-      'SELECT id, title FROM questionnaires WHERE id = ? AND user_id = ?',
-      [id, userId]
-    );
-    
-    if (questionnaires.length === 0) {
-      return res.status(404).json({ code: 404, message: '问卷不存在' });
+    if (result.error) {
+      return res.status(result.status).json({ code: result.status, message: result.error });
     }
     
-    const [questions] = await pool.execute(
-      'SELECT id, title, type, options FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
-      [id]
-    );
+    res.json({ code: 200, data: result.data });
+  } catch (error) {
+    console.error('Get responses error:', error);
+    res.status(500).json({ code: 500, message: '获取填写记录失败' });
+  }
+});
+
+router.get('/questionnaire/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const result = await getResponseList(id, page, pageSize, req.user.id);
     
-    const [responseCount] = await pool.execute(
-      'SELECT COUNT(*) as total FROM responses WHERE questionnaire_id = ?',
-      [id]
-    );
+    if (result.error) {
+      return res.status(result.status).json({ code: result.status, message: result.error });
+    }
     
-    const stats = [];
-    
-    for (const q of questions) {
-      if (q.type === 'radio' || q.type === 'checkbox') {
-        const options = JSON.parse(q.options || '[]');
-        const [answers] = await pool.execute(
-          'SELECT answer FROM response_answers WHERE question_id = ?',
-          [q.id]
-        );
-        
-        const optionStats = options.map(opt => ({
-          option: opt,
-          count: 0,
-          percentage: 0
-        }));
-        
-        answers.forEach(a => {
-          const answerValues = a.answer ? a.answer.split(',') : [];
-          answerValues.forEach(val => {
-            const idx = optionStats.findIndex(os => os.option === val);
-            if (idx !== -1) {
-              optionStats[idx].count++;
-            }
-          });
-        });
-        
-        const total = responseCount[0].total;
-        optionStats.forEach(os => {
-          os.percentage = total > 0 ? ((os.count / total) * 100).toFixed(1) : 0;
-        });
-        
-        stats.push({
-          questionId: q.id,
-          questionTitle: q.title,
-          type: q.type,
-          options: optionStats,
-          totalResponses: total
-        });
-      } else {
-        const [answers] = await pool.execute(
-          'SELECT answer FROM response_answers WHERE question_id = ? ORDER BY id DESC LIMIT 100',
-          [q.id]
-        );
-        
-        stats.push({
-          questionId: q.id,
-          questionTitle: q.title,
-          type: q.type,
-          answers: answers.map(a => a.answer).filter(a => a),
-          totalResponses: responseCount[0].total
-        });
+    res.json({ code: 200, data: result.data });
+  } catch (error) {
+    console.error('Get responses error:', error);
+    res.status(500).json({ code: 500, message: '获取填写记录失败' });
+  }
+});
+
+async function getResponseStats(id, userId) {
+  const [questionnaires] = await pool.execute(
+    'SELECT id, title FROM questionnaires WHERE id = ? AND user_id = ?',
+    [id, userId]
+  );
+  
+  if (questionnaires.length === 0) {
+    return { error: '问卷不存在', status: 404 };
+  }
+  
+  const [questions] = await pool.execute(
+    'SELECT id, title, type, options FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
+    [id]
+  );
+  
+  const [responseCount] = await pool.execute(
+    'SELECT COUNT(*) as total FROM responses WHERE questionnaire_id = ?',
+    [id]
+  );
+  
+  const stats = [];
+  
+  for (const q of questions) {
+    let options = [];
+    if (q.options) {
+      try {
+        options = JSON.parse(q.options);
+      } catch (e) {
+        options = [];
       }
     }
     
-    res.json({
-      code: 200,
-      data: {
-        questionnaire: questionnaires[0],
-        totalResponses: responseCount[0].total,
-        stats
-      }
-    });
+    if (q.type === 'radio' || q.type === 'checkbox') {
+      const [answers] = await pool.execute(
+        'SELECT answer FROM response_answers WHERE question_id = ?',
+        [q.id]
+      );
+      
+      const optionStats = options.map(opt => ({
+        option: opt,
+        count: 0,
+        percentage: 0
+      }));
+      
+      answers.forEach(a => {
+        const answerValues = a.answer ? a.answer.split(',') : [];
+        answerValues.forEach(val => {
+          const idx = optionStats.findIndex(os => os.option === val);
+          if (idx !== -1) {
+            optionStats[idx].count++;
+          }
+        });
+      });
+      
+      const total = responseCount[0].total;
+      optionStats.forEach(os => {
+        os.percentage = total > 0 ? ((os.count / total) * 100).toFixed(1) : 0;
+      });
+      
+      stats.push({
+        questionId: q.id,
+        questionTitle: q.title,
+        type: q.type,
+        options: optionStats,
+        totalResponses: total
+      });
+    } else {
+      const [answers] = await pool.execute(
+        'SELECT answer FROM response_answers WHERE question_id = ? ORDER BY id DESC LIMIT 100',
+        [q.id]
+      );
+      
+      stats.push({
+        questionId: q.id,
+        questionTitle: q.title,
+        type: q.type,
+        answers: answers.map(a => a.answer).filter(a => a),
+        totalResponses: responseCount[0].total
+      });
+    }
+  }
+  
+  return {
+    data: {
+      questionnaire: questionnaires[0],
+      totalResponses: responseCount[0].total,
+      stats
+    }
+  };
+}
+
+router.get('/:id/stats', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await getResponseStats(id, req.user.id);
+    
+    if (result.error) {
+      return res.status(result.status).json({ code: result.status, message: result.error });
+    }
+    
+    res.json({ code: 200, data: result.data });
   } catch (error) {
     console.error('Get stats error:', error);
     res.status(500).json({ code: 500, message: '获取统计数据失败' });
   }
 });
 
+router.get('/questionnaire/:id/stats', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await getResponseStats(id, req.user.id);
+    
+    if (result.error) {
+      return res.status(result.status).json({ code: result.status, message: result.error });
+    }
+    
+    res.json({ code: 200, data: result.data });
+  } catch (error) {
+    console.error('Get stats error:', error);
+    res.status(500).json({ code: 500, message: '获取统计数据失败' });
+  }
+});
+
+async function exportResponses(id, userId) {
+  const [questionnaires] = await pool.execute(
+    'SELECT id, title FROM questionnaires WHERE id = ? AND user_id = ?',
+    [id, userId]
+  );
+  
+  if (questionnaires.length === 0) {
+    return { error: '问卷不存在', status: 404 };
+  }
+  
+  const [questions] = await pool.execute(
+    'SELECT id, title FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
+    [id]
+  );
+  
+  const [responses] = await pool.execute(
+    `SELECT r.id, r.submit_time,
+     JSON_OBJECTAGG(ra.question_id, ra.answer) as answers
+     FROM responses r
+     LEFT JOIN response_answers ra ON r.id = ra.response_id
+     WHERE r.questionnaire_id = ?
+     GROUP BY r.id
+     ORDER BY r.submit_time DESC`,
+    [id]
+  );
+  
+  const headers = ['序号', '提交时间', ...questions.map(q => q.title)];
+  const rows = responses.map((r, idx) => {
+    const answers = JSON.parse(r.answers);
+    return [
+      idx + 1,
+      r.submit_time,
+      ...questions.map(q => answers[q.id] || '')
+    ];
+  });
+  
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  XLSX.utils.book_append_sheet(wb, ws, '填写记录');
+  
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  
+  return {
+    data: buffer,
+    title: questionnaires[0].title
+  };
+}
+
+router.get('/:id/export', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await exportResponses(id, req.user.id);
+    
+    if (result.error) {
+      return res.status(result.status).json({ code: result.status, message: result.error });
+    }
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.title)}_填写记录.xlsx"`);
+    
+    res.send(result.data);
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ code: 500, message: '导出失败' });
+  }
+});
+
 router.get('/questionnaire/:id/export', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
+    const result = await exportResponses(id, req.user.id);
     
-    const [questionnaires] = await pool.execute(
-      'SELECT id, title FROM questionnaires WHERE id = ? AND user_id = ?',
-      [id, userId]
-    );
-    
-    if (questionnaires.length === 0) {
-      return res.status(404).json({ code: 404, message: '问卷不存在' });
+    if (result.error) {
+      return res.status(result.status).json({ code: result.status, message: result.error });
     }
     
-    const [questions] = await pool.execute(
-      'SELECT id, title FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
-      [id]
-    );
-    
-    const [responses] = await pool.execute(
-      `SELECT r.id, r.submit_time,
-       JSON_OBJECTAGG(ra.question_id, ra.answer) as answers
-       FROM responses r
-       LEFT JOIN response_answers ra ON r.id = ra.response_id
-       WHERE r.questionnaire_id = ?
-       GROUP BY r.id
-       ORDER BY r.submit_time DESC`,
-      [id]
-    );
-    
-    const headers = ['序号', '提交时间', ...questions.map(q => q.title)];
-    const rows = responses.map((r, idx) => {
-      const answers = JSON.parse(r.answers);
-      return [
-        idx + 1,
-        r.submit_time,
-        ...questions.map(q => answers[q.id] || '')
-      ];
-    });
-    
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    XLSX.utils.book_append_sheet(wb, ws, '填写记录');
-    
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(questionnaires[0].title)}_填写记录.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.title)}_填写记录.xlsx"`);
     
-    res.send(buffer);
+    res.send(result.data);
   } catch (error) {
     console.error('Export error:', error);
     res.status(500).json({ code: 500, message: '导出失败' });
