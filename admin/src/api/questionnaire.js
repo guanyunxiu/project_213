@@ -52,3 +52,10 @@ export const getQuestionnaireStats = (id) => {
     method: 'get'
   })
 }
+
+export const getServerUrl = () => {
+  return request({
+    url: '/config/server-url',
+    method: 'get'
+  })
+}

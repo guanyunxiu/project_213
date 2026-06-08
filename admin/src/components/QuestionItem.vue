@@ -38,12 +38,14 @@
           :key="optIndex"
           class="option-item"
         >
-          <el-radio v-if="!isEdit" :label="option" :model-value="null" disabled>
-            {{ option }}
-          </el-radio>
-          <el-checkbox v-else-if="!isEdit" :label="option" :model-value="[]" disabled>
-            {{ option }}
-          </el-checkbox>
+          <template v-if="!isEdit">
+            <el-radio v-if="localQuestion.type === 'radio'" :label="option" :model-value="null" disabled>
+              {{ option }}
+            </el-radio>
+            <el-checkbox v-else :label="option" :model-value="[]" disabled>
+              {{ option }}
+            </el-checkbox>
+          </template>
           <template v-else>
             <el-radio v-if="localQuestion.type === 'radio'" disabled :label="option" />
             <el-checkbox v-else disabled :label="option" />

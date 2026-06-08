@@ -81,7 +81,8 @@ import {
   getQuestionnaireList,
   deleteQuestionnaire,
   toggleQuestionnaireStatus,
-  createQuestionnaire
+  createQuestionnaire,
+  getServerUrl
 } from '@/api/questionnaire'
 import QRCode from 'qrcode'
 
@@ -151,9 +152,19 @@ const handleResponses = (row) => {
 }
 
 const handleQrcode = async (row) => {
-  const url = `${window.location.origin}/client/questionnaire/${row.id}`
-  qrcodeUrl.value = await QRCode.toDataURL(url, { width: 256 })
-  qrcodeDialogVisible.value = true
+  try {
+    const res = await getServerUrl()
+    let baseUrl = window.location.origin
+    if (res.code === 200 && res.data.clientUrl) {
+      baseUrl = res.data.clientUrl
+    }
+    const url = `${baseUrl}/fill/${row.id}`
+    qrcodeUrl.value = await QRCode.toDataURL(url, { width: 256 })
+    qrcodeDialogVisible.value = true
+  } catch (error) {
+    console.error('Generate qrcode error:', error)
+    ElMessage.error('生成二维码失败')
+  }
 }
 
 const handleToggleStatus = async (row) => {

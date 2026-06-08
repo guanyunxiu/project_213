@@ -98,14 +98,14 @@ router.get('/:id', authMiddleware, async (req, res) => {
     );
     
     questions.forEach(q => {
-      if (q.options) {
+      if (!q.options) {
+        q.options = [];
+      } else if (typeof q.options === 'string') {
         try {
           q.options = JSON.parse(q.options);
         } catch (e) {
           q.options = [];
         }
-      } else {
-        q.options = [];
       }
     });
     
@@ -365,14 +365,14 @@ router.get('/public/:id', async (req, res) => {
     );
     
     questions.forEach(q => {
-      if (q.options) {
+      if (!q.options) {
+        q.options = [];
+      } else if (typeof q.options === 'string') {
         try {
           q.options = JSON.parse(q.options);
         } catch (e) {
           q.options = [];
         }
-      } else {
-        q.options = [];
       }
     });
     
