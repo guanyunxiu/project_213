@@ -70,10 +70,10 @@ const fetchDetail = async () => {
   loading.value = true
   try {
     const res = await getQuestionnaireDetail(id)
-    if (res.success) {
-      questionnaire.id = res.data.id
-      questionnaire.title = res.data.title
-      questionnaire.description = res.data.description || ''
+    if (res.code === 200) {
+      questionnaire.id = res.data.questionnaire.id
+      questionnaire.title = res.data.questionnaire.title
+      questionnaire.description = res.data.questionnaire.description || ''
       questionnaire.questions = res.data.questions || []
     }
   } catch (error) {

@@ -106,9 +106,9 @@ const fetchQuestionnaire = async () => {
 
   try {
     const res = await getQuestionnaireDetail(id)
-    if (res.success) {
-      questionnaire.id = res.data.id
-      questionnaire.title = res.data.title
+    if (res.code === 200) {
+      questionnaire.id = res.data.questionnaire.id
+      questionnaire.title = res.data.questionnaire.title
       questionnaire.questions = res.data.questions || []
     }
   } catch (error) {
@@ -126,7 +126,7 @@ const fetchList = async () => {
       page: pagination.page,
       pageSize: pagination.pageSize
     })
-    if (res.success) {
+    if (res.code === 200) {
       list.value = res.data.list
       pagination.total = res.data.total
     }

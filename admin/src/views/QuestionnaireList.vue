@@ -107,7 +107,7 @@ const fetchList = async () => {
       pageSize: pagination.pageSize,
       keyword: searchKeyword.value
     })
-    if (res.success) {
+    if (res.code === 200) {
       list.value = res.data.list
       pagination.total = res.data.total
     }
@@ -125,7 +125,7 @@ const handleCreate = async () => {
       description: '',
       questions: []
     })
-    if (res.success) {
+    if (res.code === 200) {
       ElMessage.success('创建成功')
       router.push(`/questionnaire/edit/${res.data.id}`)
     }
@@ -166,7 +166,7 @@ const handleToggleStatus = async (row) => {
       type: 'warning'
     })
     const res = await toggleQuestionnaireStatus(row.id, newStatus)
-    if (res.success) {
+    if (res.code === 200) {
       ElMessage.success(`${actionText}成功`)
       fetchList()
     }
@@ -185,7 +185,7 @@ const handleDelete = async (row) => {
       type: 'warning'
     })
     const res = await deleteQuestionnaire(row.id)
-    if (res.success) {
+    if (res.code === 200) {
       ElMessage.success('删除成功')
       fetchList()
     }

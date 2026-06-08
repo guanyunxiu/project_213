@@ -202,10 +202,10 @@ const fetchDetail = async () => {
 
   try {
     const res = await getQuestionnaireDetail(id)
-    if (res.success) {
-      questionnaire.id = res.data.id
-      questionnaire.title = res.data.title
-      questionnaire.description = res.data.description || ''
+    if (res.code === 200) {
+      questionnaire.id = res.data.questionnaire.id
+      questionnaire.title = res.data.questionnaire.title
+      questionnaire.description = res.data.questionnaire.description || ''
       questionnaire.questions = res.data.questions || []
     }
   } catch (error) {
@@ -234,7 +234,7 @@ const handleSave = async () => {
       description: questionnaire.description,
       questions: questionnaire.questions
     })
-    if (res.success) {
+    if (res.code === 200) {
       ElMessage.success('保存成功')
     }
   } catch (error) {

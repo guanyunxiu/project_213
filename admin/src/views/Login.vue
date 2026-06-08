@@ -121,8 +121,7 @@ const handleRegister = async () => {
       const success = await userStore.handleRegister(registerForm)
       loading.value = false
       if (success) {
-        activeTab.value = 'login'
-        registerFormRef.value?.resetFields()
+        router.push('/')
       }
     }
   })

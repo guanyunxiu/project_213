@@ -29,7 +29,7 @@ export const useUserStore = defineStore('user', () => {
   const handleLogin = async (loginForm) => {
     try {
       const res = await login(loginForm)
-      if (res.success) {
+      if (res.code === 200) {
         setToken(res.data.token)
         setUserInfo(res.data.user)
         ElMessage.success('登录成功')
@@ -45,8 +45,10 @@ export const useUserStore = defineStore('user', () => {
   const handleRegister = async (registerForm) => {
     try {
       const res = await register(registerForm)
-      if (res.success) {
-        ElMessage.success('注册成功，请登录')
+      if (res.code === 200) {
+        setToken(res.data.token)
+        setUserInfo(res.data.user)
+        ElMessage.success('注册成功，已自动登录')
         return true
       }
       return false
@@ -70,8 +72,8 @@ export const useUserStore = defineStore('user', () => {
   const fetchUserInfo = async () => {
     try {
       const res = await getUserInfo()
-      if (res.success) {
-        setUserInfo(res.data)
+      if (res.code === 200) {
+        setUserInfo(res.data.user)
       }
     } catch (error) {
       console.error('Fetch user info error:', error)

@@ -24,7 +24,7 @@ request.interceptors.request.use(
 request.interceptors.response.use(
   (response) => {
     const res = response.data
-    if (res.success) {
+    if (res.code === 200) {
       return res
     } else {
       ElMessage.error(res.message || '请求失败')

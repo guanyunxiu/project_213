@@ -6,7 +6,9 @@ const router = express.Router();
 
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const { page = 1, pageSize = 10, keyword = '' } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const keyword = req.query.keyword || '';
     const offset = (page - 1) * pageSize;
     const userId = req.user.id;
     
@@ -19,8 +21,8 @@ router.get('/', authMiddleware, async (req, res) => {
     }
     
     const [questionnaires] = await pool.execute(
-      `SELECT * FROM questionnaires ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      [...params, parseInt(pageSize), offset]
+      `SELECT * FROM questionnaires ${whereSql} ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`,
+      params
     );
     
     const [countResult] = await pool.execute(

@@ -94,7 +94,8 @@ router.post('/:id', preventDuplicateSubmit, async (req, res) => {
 router.get('/questionnaire/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const { page = 1, pageSize = 10 } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
     const offset = (page - 1) * pageSize;
     const userId = req.user.id;
     
@@ -117,8 +118,8 @@ router.get('/questionnaire/:id', authMiddleware, async (req, res) => {
        WHERE r.questionnaire_id = ?
        GROUP BY r.id
        ORDER BY r.submit_time DESC
-       LIMIT ? OFFSET ?`,
-      [id, parseInt(pageSize), offset]
+       LIMIT ${pageSize} OFFSET ${offset}`,
+      [id]
     );
     
     const [countResult] = await pool.execute(

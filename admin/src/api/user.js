@@ -18,7 +18,7 @@ export const register = (data) => {
 
 export const getUserInfo = () => {
   return request({
-    url: '/user/info',
+    url: '/user/profile',
     method: 'get'
   })
 }
