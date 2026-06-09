@@ -150,19 +150,110 @@
     </div>
 
     <div class="question-footer" v-if="isEdit">
-      <el-switch
-        v-model="localQuestion.required"
-        active-text="必填"
-        inactive-text="选填"
-        @change="emitChange"
-      />
+      <div class="footer-left">
+        <el-switch
+          v-model="localQuestion.required"
+          active-text="必填"
+          inactive-text="选填"
+          @change="emitChange"
+        />
+        <el-button
+          v-if="canHaveLogic"
+          type="warning"
+          link
+          size="small"
+          @click="showLogicPanel = !showLogicPanel"
+        >
+          <el-icon><Guide /></el-icon>
+          {{ hasLogic ? '编辑跳转' : '逻辑跳转' }}
+          <el-tag v-if="hasLogic" type="warning" size="small" class="logic-count">{{ jumpLogic.conditions.length }}条规则</el-tag>
+        </el-button>
+      </div>
+    </div>
+
+    <div v-if="isEdit && showLogicPanel && canHaveLogic" class="logic-panel">
+      <div class="logic-panel-header">
+        <span class="logic-title">
+          <el-icon><Guide /></el-icon>
+          逻辑跳转设置
+        </span>
+        <span class="logic-desc">设置当用户选择某选项时，自动跳转到指定题目</span>
+      </div>
+
+      <div class="logic-conditions">
+        <div v-for="(condition, cIdx) in jumpLogic.conditions" :key="cIdx" class="logic-condition">
+          <span class="logic-label">如果选择了</span>
+          <el-select
+            v-if="hasOptions"
+            v-model="condition.value"
+            placeholder="选择选项"
+            size="small"
+            style="width: 140px"
+            @change="emitLogicChange"
+          >
+            <el-option
+              v-for="opt in localQuestion.options"
+              :key="opt"
+              :label="opt"
+              :value="opt"
+            />
+          </el-select>
+          <el-input
+            v-else
+            v-model="condition.value"
+            placeholder="输入值"
+            size="small"
+            style="width: 140px"
+            @change="emitLogicChange"
+          />
+          <span class="logic-label">则跳转到</span>
+          <el-select
+            v-model="condition.target"
+            placeholder="选择目标题目"
+            size="small"
+            style="width: 200px"
+            @change="emitLogicChange"
+          >
+            <el-option
+              v-for="q in targetQuestions"
+              :key="q.id"
+              :label="`Q${q._displayIndex + 1}. ${q.title || '未命名题目'}`"
+              :value="q.id"
+            />
+          </el-select>
+          <el-button type="danger" link size="small" @click="removeCondition(cIdx)">
+            <el-icon><Delete /></el-icon>
+          </el-button>
+        </div>
+      </div>
+
+      <div class="logic-actions">
+        <el-button type="primary" link size="small" @click="addCondition">
+          <el-icon><Plus /></el-icon>
+          添加跳转规则
+        </el-button>
+        <el-button
+          v-if="hasLogic"
+          type="danger"
+          link
+          size="small"
+          @click="clearLogic"
+        >
+          清除所有跳转规则
+        </el-button>
+      </div>
+
+      <div class="logic-tip">
+        <el-icon><InfoFilled /></el-icon>
+        逻辑跳转规则按顺序匹配，匹配到第一条规则后停止。未匹配任何规则时，继续显示下一题。
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { Top, Bottom, Delete, Close, Plus } from '@element-plus/icons-vue'
+import { Top, Bottom, Delete, Close, Plus, Guide, InfoFilled } from '@element-plus/icons-vue'
 
 const props = defineProps({
   question: {
@@ -180,15 +271,43 @@ const props = defineProps({
   isEdit: {
     type: Boolean,
     default: true
+  },
+  questionsList: {
+    type: Array,
+    default: () => []
   }
 })
 
 const emit = defineEmits(['update', 'delete', 'moveUp', 'moveDown'])
 
 const localQuestion = ref({ ...props.question })
+const showLogicPanel = ref(false)
 
 const ratingMax = ref(localQuestion.value.options?.max || 5)
 const showScore = ref(localQuestion.value.options?.showScore || false)
+
+const jumpLogic = ref({
+  conditions: []
+})
+
+const initJumpLogic = () => {
+  if (localQuestion.value.jump_logic) {
+    try {
+      const logic = typeof localQuestion.value.jump_logic === 'string'
+        ? JSON.parse(localQuestion.value.jump_logic)
+        : localQuestion.value.jump_logic
+      jumpLogic.value = {
+        conditions: logic.conditions || []
+      }
+    } catch (e) {
+      jumpLogic.value = { conditions: [] }
+    }
+  } else {
+    jumpLogic.value = { conditions: [] }
+  }
+}
+
+initJumpLogic()
 
 watch(() => props.question, (newVal) => {
   localQuestion.value = { ...newVal }
@@ -196,7 +315,26 @@ watch(() => props.question, (newVal) => {
     ratingMax.value = newVal.options?.max || 5
     showScore.value = newVal.options?.showScore || false
   }
+  initJumpLogic()
 }, { deep: true })
+
+const canHaveLogic = computed(() => {
+  return ['radio', 'checkbox', 'select'].includes(localQuestion.value.type)
+})
+
+const hasOptions = computed(() => {
+  return ['radio', 'checkbox', 'select'].includes(localQuestion.value.type)
+})
+
+const hasLogic = computed(() => {
+  return jumpLogic.value.conditions && jumpLogic.value.conditions.length > 0
+})
+
+const targetQuestions = computed(() => {
+  return props.questionsList
+    .map((q, i) => ({ ...q, _displayIndex: i }))
+    .filter((q, i) => i > props.index)
+})
 
 const handleRatingMaxChange = (val) => {
   if (!localQuestion.value.options) {
@@ -230,6 +368,38 @@ const typeLabel = computed(() => {
 
 const emitChange = () => {
   emit('update', { ...localQuestion.value })
+}
+
+const addCondition = () => {
+  jumpLogic.value.conditions.push({
+    operator: 'eq',
+    value: '',
+    target: null
+  })
+}
+
+const removeCondition = (idx) => {
+  jumpLogic.value.conditions.splice(idx, 1)
+  emitLogicChange()
+}
+
+const clearLogic = () => {
+  jumpLogic.value = { conditions: [] }
+  localQuestion.value.jump_logic = null
+  showLogicPanel.value = false
+  emitChange()
+}
+
+const emitLogicChange = () => {
+  const validConditions = jumpLogic.value.conditions.filter(c => c.value && c.target)
+  if (validConditions.length > 0) {
+    localQuestion.value.jump_logic = {
+      conditions: validConditions
+    }
+  } else {
+    localQuestion.value.jump_logic = null
+  }
+  emitChange()
 }
 
 const addOption = () => {
@@ -430,9 +600,88 @@ const moveDown = () => {
     padding-top: 12px;
     border-top: 1px solid #ebeef5;
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     align-items: center;
-    gap: 20px;
+
+    .footer-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+
+      .logic-count {
+        margin-left: 4px;
+      }
+    }
+  }
+
+  .logic-panel {
+    margin-top: 16px;
+    padding: 16px;
+    background: #fdf6ec;
+    border-radius: 8px;
+    border: 1px solid #faecd8;
+
+    .logic-panel-header {
+      margin-bottom: 12px;
+
+      .logic-title {
+        font-weight: 600;
+        color: #e6a23c;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .logic-desc {
+        font-size: 12px;
+        color: #909399;
+        margin-top: 4px;
+      }
+    }
+
+    .logic-conditions {
+      .logic-condition {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+        padding: 8px 12px;
+        background: #fff;
+        border-radius: 6px;
+        border: 1px solid #faecd8;
+
+        .logic-label {
+          font-size: 13px;
+          color: #666;
+          white-space: nowrap;
+        }
+      }
+    }
+
+    .logic-actions {
+      display: flex;
+      gap: 16px;
+      margin-top: 8px;
+    }
+
+    .logic-tip {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: #f0f9eb;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #67c23a;
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+      line-height: 1.5;
+
+      .el-icon {
+        margin-top: 2px;
+        flex-shrink: 0;
+      }
+    }
   }
 }
 </style>

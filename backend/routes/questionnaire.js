@@ -412,15 +412,22 @@ router.post('/public/:id/verify', async (req, res) => {
     }
     
     if (questionnaire.access_type === 'password') {
-      if (!password || password !== questionnaire.password) {
-        return res.status(401).json({ code: 401, message: '密码错误', requirePassword: true });
+      if (!password) {
+        return res.json({
+          code: 200,
+          message: '需要密码验证',
+          data: { needPassword: true }
+        });
+      }
+      if (password !== questionnaire.password) {
+        return res.status(401).json({ code: 401, message: '密码错误' });
       }
     }
     
     res.json({
       code: 200,
       message: '验证成功',
-      data: { requirePassword: questionnaire.access_type === 'password' }
+      data: { needPassword: false }
     });
   } catch (error) {
     console.error('Verify questionnaire access error:', error);
@@ -431,6 +438,7 @@ router.post('/public/:id/verify', async (req, res) => {
 router.get('/public/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const { password } = req.query;
     
     const [questionnaires] = await pool.execute(
       'SELECT * FROM questionnaires WHERE id = ? AND status = 1',
@@ -450,6 +458,12 @@ router.get('/public/:id', async (req, res) => {
     
     if (questionnaire.expire_at && new Date(questionnaire.expire_at) < now) {
       return res.status(403).json({ code: 403, message: '问卷已过期' });
+    }
+    
+    if (questionnaire.access_type === 'password') {
+      if (!password || password !== questionnaire.password) {
+        return res.status(403).json({ code: 403, message: '该问卷需要密码访问，请先验证密码' });
+      }
     }
     
     const [questions] = await pool.execute(

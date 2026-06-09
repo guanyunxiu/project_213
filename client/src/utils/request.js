@@ -25,8 +25,16 @@ service.interceptors.response.use(
     return res
   },
   (error) => {
-    if (error.response && error.response.status === 429) {
-      showToast('提交过于频繁，请稍后再试')
+    if (error.response) {
+      const status = error.response.status
+      const data = error.response.data
+      if (status === 429) {
+        showToast('提交过于频繁，请稍后再试')
+      } else if (status === 401) {
+        showToast(data?.message || '密码错误')
+      } else if (status !== 403) {
+        showToast(data?.message || error.message || '网络错误')
+      }
     } else {
       showToast(error.message || '网络错误')
     }

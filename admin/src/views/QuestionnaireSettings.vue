@@ -134,8 +134,27 @@
           </div>
 
           <div v-show="activeTab === 'logic'" class="tab-content">
-            <h3 class="tab-title">逻辑设置</h3>
-            <el-empty description="逻辑设置功能开发中..." :image-size="100" />
+            <h3 class="tab-title">逻辑跳转总览</h3>
+            <p class="logic-intro">逻辑跳转规则在问卷编辑页面中按题目配置。此处展示当前问卷已配置的所有跳转规则。</p>
+            <div v-if="logicRules.length > 0" class="logic-rules">
+              <div v-for="rule in logicRules" :key="rule.questionId" class="logic-rule-item">
+                <div class="rule-source">
+                  <el-tag type="primary" size="small">Q{{ rule.questionIndex + 1 }}</el-tag>
+                  <span class="rule-title">{{ rule.questionTitle }}</span>
+                </div>
+                <div class="rule-conditions">
+                  <div v-for="(cond, ci) in rule.conditions" :key="ci" class="rule-condition">
+                    <span class="rule-arrow">→</span>
+                    <span class="rule-text">选择了「{{ cond.value }}」</span>
+                    <span class="rule-arrow">→</span>
+                    <span class="rule-target">跳转到 Q{{ cond.targetIndex + 1 }}. {{ cond.targetTitle }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <el-empty v-else description="暂无逻辑跳转规则" :image-size="80">
+              <el-button type="primary" @click="goToEdit">前往编辑页面配置</el-button>
+            </el-empty>
           </div>
         </el-form>
       </div>
@@ -144,7 +163,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -168,10 +187,38 @@ const loading = ref(false)
 const saving = ref(false)
 const activeTab = ref('basic')
 const settingsFormRef = ref(null)
+const questionsList = ref([])
 
 const questionnaire = reactive({
   id: '',
   title: ''
+})
+
+const logicRules = computed(() => {
+  return questionsList.value
+    .map((q, i) => {
+      let jumpLogic = q.jump_logic
+      if (!jumpLogic) return null
+      if (typeof jumpLogic === 'string') {
+        try { jumpLogic = JSON.parse(jumpLogic) } catch { return null }
+      }
+      if (!jumpLogic.conditions || jumpLogic.conditions.length === 0) return null
+      return {
+        questionId: q.id,
+        questionIndex: i,
+        questionTitle: q.title || '未命名题目',
+        conditions: jumpLogic.conditions.map(c => {
+          const targetIdx = questionsList.value.findIndex(tq => tq.id === c.target)
+          return {
+            value: c.value,
+            target: c.target,
+            targetIndex: targetIdx !== -1 ? targetIdx : questionsList.value.length,
+            targetTitle: targetIdx !== -1 ? (questionsList.value[targetIdx].title || '未命名题目') : '问卷结束'
+          }
+        })
+      }
+    })
+    .filter(Boolean)
 })
 
 const settingsForm = reactive({
@@ -219,6 +266,7 @@ const fetchSettings = async () => {
     if (detailRes.code === 200) {
       questionnaire.id = detailRes.data.questionnaire.id
       questionnaire.title = detailRes.data.questionnaire.title
+      questionsList.value = detailRes.data.questions || []
     }
 
     if (settingsRes.code === 200) {
@@ -277,6 +325,10 @@ const handleSave = async () => {
 }
 
 const handleBack = () => {
+  router.push(`/questionnaire/edit/${questionnaire.id}`)
+}
+
+const goToEdit = () => {
   router.push(`/questionnaire/edit/${questionnaire.id}`)
 }
 
@@ -363,6 +415,66 @@ onMounted(() => {
       margin-left: 12px;
       color: #909399;
       font-size: 12px;
+    }
+
+    .logic-intro {
+      font-size: 14px;
+      color: #909399;
+      margin: 0 0 20px 0;
+      line-height: 1.6;
+    }
+
+    .logic-rules {
+      .logic-rule-item {
+        background: #fdf6ec;
+        border: 1px solid #faecd8;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+
+        .rule-source {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 12px;
+
+          .rule-title {
+            font-weight: 500;
+            color: #333;
+            font-size: 14px;
+          }
+        }
+
+        .rule-conditions {
+          padding-left: 20px;
+
+          .rule-condition {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            padding: 8px 12px;
+            background: #fff;
+            border-radius: 6px;
+
+            .rule-arrow {
+              color: #e6a23c;
+              font-weight: bold;
+            }
+
+            .rule-text {
+              color: #666;
+              font-size: 13px;
+            }
+
+            .rule-target {
+              color: #409eff;
+              font-size: 13px;
+              font-weight: 500;
+            }
+          }
+        }
+      }
     }
   }
 }

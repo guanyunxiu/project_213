@@ -21,13 +21,6 @@
     </div>
 
     <div v-else-if="needPassword" class="password-container">
-      <van-nav-bar
-        title="密码验证"
-        :fixed="true"
-        :placeholder="true"
-        :border="false"
-        class="navbar"
-      />
       <div class="password-content">
         <div class="password-icon">
           <van-icon name="lock" size="64" color="#1989fa" />
@@ -40,6 +33,8 @@
           placeholder="请输入访问密码"
           class="password-input"
           :border="false"
+          :error-message="passwordError"
+          @keyup.enter="verifyPassword"
         />
         <van-button
           type="primary"
@@ -106,6 +101,7 @@ const errorMessage = ref('问卷不存在或已停用')
 const needPassword = ref(false)
 const password = ref('')
 const verifying = ref(false)
+const passwordError = ref('')
 const submitting = ref(false)
 const questionnaire = ref({})
 const questions = ref([])
@@ -113,12 +109,12 @@ const answers = reactive({})
 const errors = reactive({})
 const skippedQuestions = ref([])
 const respondentIdentity = ref(null)
+const verifiedPassword = ref('')
 
 const generateIdentity = () => {
-  const ip = '0.0.0.0'
   const ua = navigator.userAgent
   let hash = 0
-  const str = ip + ua
+  const str = ua
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i)
     hash = ((hash << 5) - hash) + char
@@ -132,16 +128,16 @@ const verifyAccess = async () => {
     loading.value = true
     error.value = false
     needPassword.value = false
+    passwordError.value = ''
     const id = route.params.id
     respondentIdentity.value = generateIdentity()
     
-    const res = await verifyQuestionnaireAccess(id, { 
-      identity: respondentIdentity.value,
-      password: password.value || undefined
+    const res = await verifyQuestionnaireAccess(id, {
+      identity: respondentIdentity.value
     })
     
     if (res.code === 200) {
-      if (res.data.needPassword && !password.value) {
+      if (res.data.needPassword) {
         needPassword.value = true
         loading.value = false
         return
@@ -151,10 +147,8 @@ const verifyAccess = async () => {
     }
   } catch (err) {
     error.value = true
-    if (err.response?.data?.message) {
-      errorMessage.value = err.response.data.message
-    } else if (err.response?.status === 403) {
-      errorMessage.value = '您已达到填写次数上限'
+    if (err.response?.status === 403) {
+      errorMessage.value = err.response.data?.message || '您已达到填写次数上限'
     } else if (err.response?.status === 404) {
       errorMessage.value = '问卷不存在或已停用'
     } else {
@@ -166,12 +160,38 @@ const verifyAccess = async () => {
 
 const verifyPassword = async () => {
   if (!password.value.trim()) {
-    showToast('请输入密码')
+    passwordError.value = '请输入密码'
     return
   }
+  
   verifying.value = true
-  await verifyAccess()
-  verifying.value = false
+  passwordError.value = ''
+  
+  try {
+    const id = route.params.id
+    const res = await verifyQuestionnaireAccess(id, {
+      identity: respondentIdentity.value,
+      password: password.value
+    })
+    
+    if (res.code === 200) {
+      if (res.data.needPassword) {
+        passwordError.value = '密码错误，请重新输入'
+      } else {
+        verifiedPassword.value = password.value
+        needPassword.value = false
+        await fetchQuestionnaire()
+      }
+    }
+  } catch (err) {
+    if (err.response?.status === 401) {
+      passwordError.value = '密码错误，请重新输入'
+    } else {
+      passwordError.value = '验证失败，请重试'
+    }
+  } finally {
+    verifying.value = false
+  }
 }
 
 const fetchQuestionnaire = async () => {
@@ -179,7 +199,12 @@ const fetchQuestionnaire = async () => {
     loading.value = true
     error.value = false
     const id = route.params.id
-    const res = await getPublicQuestionnaire(id)
+    const params = {}
+    if (verifiedPassword.value) {
+      params.password = verifiedPassword.value
+    }
+    
+    const res = await getPublicQuestionnaire(id, params)
     questionnaire.value = res.data.questionnaire
     questions.value = res.data.questions
     
@@ -206,33 +231,31 @@ const fetchQuestionnaire = async () => {
     })
   } catch (err) {
     error.value = true
-    errorMessage.value = '获取问卷失败，请重试'
+    if (err.response?.status === 403) {
+      errorMessage.value = '该问卷需要密码访问'
+      needPassword.value = true
+    } else {
+      errorMessage.value = '获取问卷失败，请重试'
+    }
     console.error('获取问卷失败:', err)
   } finally {
     loading.value = false
-    needPassword.value = false
   }
 }
 
 const handleQuestionJump = async (targetQuestionId) => {
-  const currentIndex = questions.value.findIndex(q => answers.hasOwnProperty(q.id))
+  const currentQuestionIdx = questions.value.findIndex(q => q.jump_logic)
   const targetIndex = questions.value.findIndex(q => q.id === targetQuestionId)
   
-  if (targetIndex > currentIndex) {
+  if (targetIndex === -1) return
+  
+  if (currentQuestionIdx !== -1 && targetIndex > currentQuestionIdx) {
     skippedQuestions.value = questions.value
-      .slice(currentIndex + 1, targetIndex)
+      .slice(currentQuestionIdx + 1, targetIndex)
       .map(q => q.id)
-  } else if (targetIndex < currentIndex) {
-    skippedQuestions.value = skippedQuestions.value.filter(
-      id => !questions.value.slice(targetIndex, currentIndex).some(q => q.id === id)
-    )
   }
   
   await nextTick()
-  const targetEl = document.querySelector(`[data-question-id="${targetQuestionId}"]`)
-  if (targetEl) {
-    targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
 }
 
 const validateForm = () => {
@@ -282,6 +305,10 @@ const handleSubmit = async () => {
     const submitData = {
       answers: {},
       identity: respondentIdentity.value
+    }
+    
+    if (verifiedPassword.value) {
+      submitData.password = verifiedPassword.value
     }
     
     Object.keys(answers).forEach(key => {

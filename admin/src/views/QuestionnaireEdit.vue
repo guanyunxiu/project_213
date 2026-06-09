@@ -68,6 +68,7 @@
                 :index="index"
                 :total="questionnaire.questions.length"
                 :is-edit="true"
+                :questions-list="questionnaire.questions"
                 @update="(data) => handleQuestionUpdate(index, data)"
                 @delete="() => handleQuestionDelete(index)"
                 @move-up="() => handleMoveUp(index)"

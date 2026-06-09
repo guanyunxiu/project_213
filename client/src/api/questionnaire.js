@@ -8,10 +8,11 @@ export const verifyQuestionnaireAccess = (id, data) => {
   })
 }
 
-export const getPublicQuestionnaire = (id) => {
+export const getPublicQuestionnaire = (id, params = {}) => {
   return request({
     url: `/questionnaire/public/${id}`,
-    method: 'get'
+    method: 'get',
+    params
   })
 }
 
