@@ -290,30 +290,36 @@ const jumpLogic = ref({
   conditions: []
 })
 
+let skipWatchJumpLogic = false
+
 const initJumpLogic = () => {
   if (localQuestion.value.jump_logic) {
     try {
       const logic = typeof localQuestion.value.jump_logic === 'string'
         ? JSON.parse(localQuestion.value.jump_logic)
         : localQuestion.value.jump_logic
-      jumpLogic.value = {
-        conditions: logic.conditions || []
+      if (logic.conditions && logic.conditions.length > 0) {
+        jumpLogic.value = {
+          conditions: logic.conditions.map(c => ({ ...c }))
+        }
+        return
       }
-    } catch (e) {
-      jumpLogic.value = { conditions: [] }
-    }
-  } else {
-    jumpLogic.value = { conditions: [] }
+    } catch (e) { /* fallthrough */ }
   }
+  jumpLogic.value = { conditions: [] }
 }
 
 initJumpLogic()
 
-watch(() => props.question, (newVal) => {
+watch(() => props.question, (newVal, oldVal) => {
   localQuestion.value = { ...newVal }
   if (newVal.type === 'rating') {
     ratingMax.value = newVal.options?.max || 5
     showScore.value = newVal.options?.showScore || false
+  }
+  if (skipWatchJumpLogic) {
+    skipWatchJumpLogic = false
+    return
   }
   initJumpLogic()
 }, { deep: true })
@@ -390,16 +396,21 @@ const clearLogic = () => {
   emitChange()
 }
 
-const emitLogicChange = () => {
+const syncLogicToQuestion = () => {
   const validConditions = jumpLogic.value.conditions.filter(c => c.value && c.target)
   if (validConditions.length > 0) {
     localQuestion.value.jump_logic = {
-      conditions: validConditions
+      conditions: validConditions.map(c => ({ operator: 'eq', value: c.value, target: c.target }))
     }
   } else {
     localQuestion.value.jump_logic = null
   }
+  skipWatchJumpLogic = true
   emitChange()
+}
+
+const emitLogicChange = () => {
+  syncLogicToQuestion()
 }
 
 const addOption = () => {

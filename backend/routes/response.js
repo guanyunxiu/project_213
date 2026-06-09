@@ -162,7 +162,7 @@ router.post('/:id', preventDuplicateSubmit, async (req, res) => {
   }
 });
 
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/questionnaire/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const page = parseInt(req.query.page) || 1;
@@ -189,8 +189,8 @@ router.get('/:id', authMiddleware, async (req, res) => {
        WHERE r.questionnaire_id = ?
        GROUP BY r.id
        ORDER BY r.submit_time DESC
-       LIMIT ${pageSize} OFFSET ${offset}`,
-      [id]
+       LIMIT ? OFFSET ?`,
+      [id, pageSize, offset]
     );
     
     const [countResult] = await pool.execute(
@@ -199,13 +199,16 @@ router.get('/:id', authMiddleware, async (req, res) => {
     );
     
     responses.forEach(r => {
-      if (typeof r.answers === 'string') {
-        r.answers = JSON.parse(r.answers);
+      let answersArr = r.answers;
+      if (typeof answersArr === 'string') {
+        try { answersArr = JSON.parse(answersArr); } catch (e) { answersArr = []; }
       }
       const answerMap = {};
-      if (r.answers && Array.isArray(r.answers)) {
-        r.answers.forEach(a => {
-          answerMap[a.question_id] = a.answer;
+      if (answersArr && Array.isArray(answersArr)) {
+        answersArr.forEach(a => {
+          if (a && a.question_id) {
+            answerMap[a.question_id] = a.answer;
+          }
         });
       }
       r.answers = answerMap;
@@ -221,87 +224,6 @@ router.get('/:id', authMiddleware, async (req, res) => {
         pageSize: parseInt(pageSize)
       }
     });
-  } catch (error) {
-    console.error('Get responses error:', error);
-    res.status(500).json({ code: 500, message: '获取填写记录失败' });
-  }
-});
-
-async function getResponseList(id, page, pageSize, userId) {
-  const offset = (page - 1) * pageSize;
-  
-  const [questionnaires] = await pool.execute(
-    'SELECT id FROM questionnaires WHERE id = ? AND user_id = ?',
-    [id, userId]
-  );
-  
-  if (questionnaires.length === 0) {
-    return { error: '问卷不存在', status: 404 };
-  }
-  
-  const [responses] = await pool.execute(
-    `SELECT r.id, r.respondent_ip, r.submit_time,
-     JSON_ARRAYAGG(
-       JSON_OBJECT('question_id', ra.question_id, 'answer', ra.answer)
-     ) as answers
-     FROM responses r
-     LEFT JOIN response_answers ra ON r.id = ra.response_id
-     WHERE r.questionnaire_id = ?
-     GROUP BY r.id
-     ORDER BY r.submit_time DESC
-     LIMIT ${pageSize} OFFSET ${offset}`,
-    [id]
-  );
-  
-  const [countResult] = await pool.execute(
-    'SELECT COUNT(*) as total FROM responses WHERE questionnaire_id = ?',
-    [id]
-  );
-  
-  responses.forEach(r => {
-    r.answers = JSON.parse(r.answers);
-  });
-  
-  return {
-    data: {
-      list: responses,
-      total: countResult[0].total,
-      page: page,
-      pageSize: pageSize
-    }
-  };
-}
-
-router.get('/:id', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 10;
-    const result = await getResponseList(id, page, pageSize, req.user.id);
-    
-    if (result.error) {
-      return res.status(result.status).json({ code: result.status, message: result.error });
-    }
-    
-    res.json({ code: 200, data: result.data });
-  } catch (error) {
-    console.error('Get responses error:', error);
-    res.status(500).json({ code: 500, message: '获取填写记录失败' });
-  }
-});
-
-router.get('/questionnaire/:id', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 10;
-    const result = await getResponseList(id, page, pageSize, req.user.id);
-    
-    if (result.error) {
-      return res.status(result.status).json({ code: result.status, message: result.error });
-    }
-    
-    res.json({ code: 200, data: result.data });
   } catch (error) {
     console.error('Get responses error:', error);
     res.status(500).json({ code: 500, message: '获取填写记录失败' });
@@ -541,12 +463,16 @@ async function exportResponses(id, userId, format = 'xlsx') {
   
   const headers = ['序号', '提交时间', 'IP地址', ...questions.map(q => q.title)];
   const rows = responses.map((r, idx) => {
-    const answers = JSON.parse(r.answers);
+    let answers = r.answers;
+    if (typeof answers === 'string') {
+      try { answers = JSON.parse(answers); } catch (e) { answers = {}; }
+    }
+    const answersMap = answers || {};
     return [
       idx + 1,
       r.submit_time,
       r.respondent_ip,
-      ...questions.map(q => answers[q.id] || '')
+      ...questions.map(q => answersMap[q.id] || '')
     ];
   });
   

@@ -11,10 +11,25 @@
             <el-icon><ArrowLeft /></el-icon>
             返回
           </el-button>
-          <el-button type="success" @click="handleExport" :loading="exporting">
-            <el-icon><Download /></el-icon>
-            导出Excel
-          </el-button>
+          <el-dropdown @command="handleExport" trigger="click">
+            <el-button type="success" :loading="exporting">
+              <el-icon><Download /></el-icon>
+              导出数据
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="xlsx">
+                  <el-icon><Document /></el-icon>
+                  导出 Excel
+                </el-dropdown-item>
+                <el-dropdown-item command="csv">
+                  <el-icon><Tickets /></el-icon>
+                  导出 CSV
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
     </div>
@@ -67,7 +82,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Download } from '@element-plus/icons-vue'
+import { ArrowLeft, Download, ArrowDown, Document, Tickets } from '@element-plus/icons-vue'
 import { getResponseList, exportResponses } from '@/api/response'
 import { getQuestionnaireDetail } from '@/api/questionnaire'
 
@@ -141,24 +156,26 @@ const fetchList = async () => {
   }
 }
 
-const handleExport = async () => {
+const handleExport = async (format = 'xlsx') => {
   const id = route.params.id
   if (!id) return
 
   exporting.value = true
   try {
-    const blob = await exportResponses(id)
+    const blob = await exportResponses(id, format)
     const url = window.URL.createObjectURL(new Blob([blob]))
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `${questionnaire.title}_填写记录_${Date.now()}.xlsx`)
+    const ext = format === 'csv' ? 'csv' : 'xlsx'
+    link.setAttribute('download', `${questionnaire.title}_填写记录_${Date.now()}.${ext}`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
     window.URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
+    ElMessage.success(`导出${format === 'csv' ? 'CSV' : 'Excel'}成功`)
   } catch (error) {
     console.error('Export error:', error)
+    ElMessage.error('导出失败')
   } finally {
     exporting.value = false
   }
