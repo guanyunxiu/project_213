@@ -17,15 +17,19 @@
 </template>
 
 <script setup>
-import { CreditCard, Select, Edit, ChatLineSquare } from '@element-plus/icons-vue'
+import { CreditCard, Select, Edit, ChatLineSquare, List, Calendar, Star, Document } from '@element-plus/icons-vue'
 
 const emit = defineEmits(['addQuestion'])
 
 const questionTypes = [
-  { label: '单选题', value: 'radio', icon: CreditCard },
-  { label: '多选题', value: 'checkbox', icon: Select },
-  { label: '文本题', value: 'text', icon: Edit },
-  { label: '多行文本', value: 'textarea', icon: ChatLineSquare }
+  { label: '单选题', value: 'radio', icon: CreditCard, category: 'choice' },
+  { label: '多选题', value: 'checkbox', icon: Select, category: 'choice' },
+  { label: '下拉题', value: 'select', icon: List, category: 'choice' },
+  { label: '文本题', value: 'text', icon: Edit, category: 'input' },
+  { label: '多行文本', value: 'textarea', icon: ChatLineSquare, category: 'input' },
+  { label: '日期题', value: 'date', icon: Calendar, category: 'input' },
+  { label: '量表题', value: 'rating', icon: Star, category: 'input' },
+  { label: '说明文本', value: 'description', icon: Document, category: 'other' }
 ]
 
 const handleDragStart = (event, type) => {

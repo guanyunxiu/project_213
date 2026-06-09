@@ -32,7 +32,7 @@
         </span>
       </div>
 
-      <div class="question-options" v-if="localQuestion.type === 'radio' || localQuestion.type === 'checkbox'">
+      <div class="question-options" v-if="localQuestion.type === 'radio' || localQuestion.type === 'checkbox' || localQuestion.type === 'select'">
         <div
           v-for="(option, optIndex) in localQuestion.options"
           :key="optIndex"
@@ -42,13 +42,19 @@
             <el-radio v-if="localQuestion.type === 'radio'" :label="option" :model-value="null" disabled>
               {{ option }}
             </el-radio>
-            <el-checkbox v-else :label="option" :model-value="[]" disabled>
+            <el-checkbox v-else-if="localQuestion.type === 'checkbox'" :label="option" :model-value="[]" disabled>
               {{ option }}
             </el-checkbox>
+            <el-select v-else disabled style="width: 200px">
+              <el-option :label="option" :value="option" />
+            </el-select>
           </template>
           <template v-else>
             <el-radio v-if="localQuestion.type === 'radio'" disabled :label="option" />
-            <el-checkbox v-else disabled :label="option" />
+            <el-checkbox v-else-if="localQuestion.type === 'checkbox'" disabled :label="option" />
+            <el-select v-else disabled style="width: 80px">
+              <el-option :label="option" :value="option" />
+            </el-select>
             <el-input
               v-model="localQuestion.options[optIndex]"
               placeholder="选项内容"
@@ -95,6 +101,52 @@
           @blur="emitChange"
         />
       </div>
+
+      <div v-else-if="localQuestion.type === 'date'" class="question-input">
+        <el-date-picker v-if="!isEdit" type="date" placeholder="请选择日期" disabled style="width: 100%" />
+        <div v-else class="date-settings">
+          <span class="setting-label">日期类型：</span>
+          <el-select v-model="localQuestion.dateType" size="small" @change="emitChange">
+            <el-option label="日期" value="date" />
+            <el-option label="日期时间" value="datetime" />
+            <el-option label="日期范围" value="daterange" />
+          </el-select>
+        </div>
+      </div>
+
+      <div v-else-if="localQuestion.type === 'rating'" class="question-rating">
+        <div v-if="!isEdit" class="rating-preview">
+          <el-rate disabled :max="localQuestion.options?.max || 5" />
+        </div>
+        <div v-else class="rating-settings">
+          <span class="setting-label">最大分值：</span>
+          <el-input-number 
+            v-model="ratingMax" 
+            :min="3" 
+            :max="10" 
+            size="small" 
+            @change="handleRatingMaxChange"
+          />
+          <span class="setting-label ml-20">显示分值：</span>
+          <el-switch v-model="showScore" @change="handleShowScoreChange" />
+        </div>
+      </div>
+
+      <div v-else-if="localQuestion.type === 'description'" class="question-description">
+        <div v-if="!isEdit" class="description-text">
+          {{ localQuestion.title }}
+        </div>
+        <div v-else class="description-edit">
+          <el-input
+            v-model="localQuestion.title"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入说明文本内容"
+            @blur="emitChange"
+          />
+          <div class="description-tip">说明文本不需要填写，仅用于展示信息</div>
+        </div>
+      </div>
     </div>
 
     <div class="question-footer" v-if="isEdit">
@@ -135,16 +187,43 @@ const emit = defineEmits(['update', 'delete', 'moveUp', 'moveDown'])
 
 const localQuestion = ref({ ...props.question })
 
+const ratingMax = ref(localQuestion.value.options?.max || 5)
+const showScore = ref(localQuestion.value.options?.showScore || false)
+
 watch(() => props.question, (newVal) => {
   localQuestion.value = { ...newVal }
+  if (newVal.type === 'rating') {
+    ratingMax.value = newVal.options?.max || 5
+    showScore.value = newVal.options?.showScore || false
+  }
 }, { deep: true })
+
+const handleRatingMaxChange = (val) => {
+  if (!localQuestion.value.options) {
+    localQuestion.value.options = {}
+  }
+  localQuestion.value.options.max = val
+  emitChange()
+}
+
+const handleShowScoreChange = (val) => {
+  if (!localQuestion.value.options) {
+    localQuestion.value.options = {}
+  }
+  localQuestion.value.options.showScore = val
+  emitChange()
+}
 
 const typeLabel = computed(() => {
   const labels = {
     radio: '单选题',
     checkbox: '多选题',
+    select: '下拉题',
     text: '文本题',
-    textarea: '多行文本'
+    textarea: '多行文本',
+    date: '日期题',
+    rating: '量表题',
+    description: '说明文本'
   }
   return labels[localQuestion.value.type] || '未知题型'
 })
@@ -289,6 +368,61 @@ const moveDown = () => {
     .question-textarea {
       padding-left: 28px;
     }
+
+    .question-rating {
+      padding-left: 28px;
+
+      .rating-preview {
+        padding: 8px 0;
+      }
+
+      .rating-settings {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        .setting-label {
+          color: #666;
+          font-size: 14px;
+        }
+      }
+    }
+
+    .question-description {
+      padding-left: 28px;
+
+      .description-text {
+        padding: 12px 16px;
+        background: #f5f7fa;
+        border-radius: 6px;
+        line-height: 1.6;
+        color: #333;
+        white-space: pre-wrap;
+      }
+
+      .description-edit {
+        .description-tip {
+          margin-top: 8px;
+          color: #909399;
+          font-size: 12px;
+        }
+      }
+    }
+
+    .date-settings {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .setting-label {
+        color: #666;
+        font-size: 14px;
+      }
+    }
+
+    .ml-20 {
+      margin-left: 20px;
+    }
   }
 
   .question-footer {
@@ -297,6 +431,8 @@ const moveDown = () => {
     border-top: 1px solid #ebeef5;
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    gap: 20px;
   }
 }
 </style>

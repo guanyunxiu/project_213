@@ -13,10 +13,43 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button type="primary" @click="handleCreate">
-          <el-icon><Plus /></el-icon>
-          新建问卷
-        </el-button>
+        <el-button-group>
+          <el-button type="primary" @click="handleCreate">
+            <el-icon><Plus /></el-icon>
+            新建问卷
+          </el-button>
+          <el-dropdown @command="handleCreateFromTemplate" trigger="click">
+            <el-button type="primary">
+              <el-icon><Collection /></el-icon>
+              从模板创建
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="survey">
+                  <el-icon><DataAnalysis /></el-icon>
+                  调研问卷模板
+                </el-dropdown-item>
+                <el-dropdown-item command="sign">
+                  <el-icon><EditPen /></el-icon>
+                  报名登记模板
+                </el-dropdown-item>
+                <el-dropdown-item command="feedback">
+                  <el-icon><ChatDotRound /></el-icon>
+                  反馈收集模板
+                </el-dropdown-item>
+                <el-dropdown-item command="evaluation">
+                  <el-icon><TrendCharts /></el-icon>
+                  测评评估模板
+                </el-dropdown-item>
+                <el-dropdown-item divided command="all">
+                  <el-icon><Grid /></el-icon>
+                  更多模板...
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </el-button-group>
       </div>
     </div>
 
@@ -76,13 +109,15 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Plus } from '@element-plus/icons-vue'
+import { Search, Plus, ArrowDown, Collection, DataAnalysis, EditPen, ChatDotRound, TrendCharts, Grid } from '@element-plus/icons-vue'
 import {
   getQuestionnaireList,
   deleteQuestionnaire,
   toggleQuestionnaireStatus,
   createQuestionnaire,
-  getServerUrl
+  getServerUrl,
+  getPublicTemplates,
+  applyTemplate
 } from '@/api/questionnaire'
 import QRCode from 'qrcode'
 
@@ -132,6 +167,32 @@ const handleCreate = async () => {
     }
   } catch (error) {
     console.error('Create error:', error)
+  }
+}
+
+const handleCreateFromTemplate = async (command) => {
+  if (command === 'all') {
+    router.push('/template')
+    return
+  }
+
+  try {
+    const res = await getPublicTemplates({ category: command })
+    if (res.code === 200 && res.data.list.length > 0) {
+      const template = res.data.list[0]
+      const applyRes = await applyTemplate(template.id, {
+        title: template.name,
+        description: template.description
+      })
+      if (applyRes.code === 200) {
+        ElMessage.success('套用模板成功')
+        router.push(`/questionnaire/edit/${applyRes.data.id}`)
+      }
+    } else {
+      ElMessage.warning('该分类暂无模板')
+    }
+  } catch (error) {
+    console.error('Create from template error:', error)
   }
 }
 

@@ -62,13 +62,69 @@
           class="textarea-field"
         />
       </template>
+
+      <template v-else-if="question.type === 'select'">
+        <van-field
+          v-model="currentValue"
+          is-link
+          readonly
+          placeholder="请选择"
+          :border="false"
+          class="select-field"
+          @click="showPicker = true"
+        />
+        <van-popup v-model:show="showPicker" position="bottom">
+          <van-picker
+            :columns="question.options"
+            @confirm="onPickerConfirm"
+            @cancel="showPicker = false"
+          />
+        </van-popup>
+      </template>
+
+      <template v-else-if="question.type === 'date'">
+        <van-field
+          v-model="currentValue"
+          is-link
+          readonly
+          placeholder="请选择日期"
+          :border="false"
+          class="date-field"
+          @click="showDatePicker = true"
+        />
+        <van-calendar
+          v-model:show="showDatePicker"
+          :type="question.dateType === 'daterange' ? 'range' : 'single'"
+          @confirm="onDateConfirm"
+        />
+      </template>
+
+      <template v-else-if="question.type === 'rating'">
+        <div class="rating-field">
+          <van-rate
+            v-model="currentValue"
+            :max="question.options?.max || 5"
+            size="32px"
+            :allow-half="false"
+          />
+          <span v-if="question.options?.showScore && currentValue" class="rating-score">
+            {{ currentValue }} 分
+          </span>
+        </div>
+      </template>
+
+      <template v-else-if="question.type === 'description'">
+        <div class="description-field">
+          {{ question.title }}
+        </div>
+      </template>
     </div>
     <div v-if="error" class="error-message">{{ error }}</div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 
 const props = defineProps({
   question: {
@@ -76,7 +132,7 @@ const props = defineProps({
     required: true
   },
   modelValue: {
-    type: [String, Array],
+    type: [String, Array, Number],
     default: ''
   },
   error: {
@@ -85,20 +141,79 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'jump'])
 
-const currentValue = ref(props.question.type === 'checkbox' ? (props.modelValue || []) : (props.modelValue || ''))
+const showPicker = ref(false)
+const showDatePicker = ref(false)
+
+const getDefaultValue = () => {
+  const type = props.question.type
+  if (type === 'checkbox') return props.modelValue || []
+  if (type === 'rating') return props.modelValue || null
+  return props.modelValue || ''
+}
+
+const currentValue = ref(getDefaultValue())
+
+const formattedDate = computed(() => {
+  if (!currentValue.value) return ''
+  if (Array.isArray(currentValue.value)) {
+    return currentValue.value.join(' 至 ')
+  }
+  return currentValue.value
+})
 
 watch(
   () => props.modelValue,
   (newVal) => {
-    currentValue.value = props.question.type === 'checkbox' ? (newVal || []) : (newVal || '')
+    const type = props.question.type
+    if (type === 'checkbox') {
+      currentValue.value = newVal || []
+    } else if (type === 'rating') {
+      currentValue.value = newVal || null
+    } else {
+      currentValue.value = newVal || ''
+    }
   }
 )
 
 watch(currentValue, (newVal) => {
   emit('update:modelValue', newVal)
+  checkJumpLogic(newVal)
 }, { deep: true })
+
+const checkJumpLogic = (val) => {
+  if (!props.question.jump_logic) return
+  
+  const jump = props.question.jump_logic
+  let targetQuestionId = null
+  
+  if (jump.conditions && Array.isArray(jump.conditions)) {
+    for (const condition of jump.conditions) {
+      let match = false
+      const answerVal = Array.isArray(val) ? val : [val]
+      
+      if (condition.operator === 'eq') {
+        match = answerVal.includes(condition.value)
+      } else if (condition.operator === 'ne') {
+        match = !answerVal.includes(condition.value)
+      } else if (condition.operator === 'gt') {
+        match = parseFloat(val) > parseFloat(condition.value)
+      } else if (condition.operator === 'lt') {
+        match = parseFloat(val) < parseFloat(condition.value)
+      }
+      
+      if (match) {
+        targetQuestionId = condition.target
+        break
+      }
+    }
+  }
+  
+  if (targetQuestionId !== null) {
+    emit('jump', targetQuestionId)
+  }
+}
 
 const selectOption = (option) => {
   currentValue.value = option
@@ -111,6 +226,28 @@ const toggleOption = (option) => {
   } else {
     currentValue.value.splice(index, 1)
   }
+}
+
+const onPickerConfirm = ({ selectedOptions }) => {
+  currentValue.value = selectedOptions[0]
+  showPicker.value = false
+}
+
+const onDateConfirm = (value) => {
+  if (Array.isArray(value)) {
+    currentValue.value = value.map(v => formatDate(v))
+  } else {
+    currentValue.value = formatDate(value)
+  }
+  showDatePicker.value = false
+}
+
+const formatDate = (date) => {
+  const d = new Date(date)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 </script>
 
@@ -175,6 +312,43 @@ const toggleOption = (option) => {
 .textarea-field {
   :deep(.van-field__control) {
     min-height: 100px;
+  }
+}
+
+.select-field,
+.date-field {
+  :deep(.van-field__control) {
+    background-color: #f7f8fa;
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+}
+
+.rating-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+
+  .rating-score {
+    font-size: 14px;
+    color: #ff976a;
+    font-weight: 500;
+  }
+}
+
+.description-field {
+  padding: 16px;
+  background-color: #f0f9ff;
+  border-radius: 8px;
+  color: #323233;
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.no-required {
+  .required {
+    display: none;
   }
 }
 

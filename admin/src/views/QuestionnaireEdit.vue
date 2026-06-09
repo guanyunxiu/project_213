@@ -23,6 +23,14 @@
             <el-icon><ArrowLeft /></el-icon>
             返回
           </el-button>
+          <el-button @click="handleSaveAsTemplate">
+            <el-icon><Collection /></el-icon>
+            保存为模板
+          </el-button>
+          <el-button @click="handleAdvancedSettings">
+            <el-icon><Setting /></el-icon>
+            高级设置
+          </el-button>
           <el-button type="primary" @click="handlePreview">
             <el-icon><View /></el-icon>
             预览
@@ -88,6 +96,10 @@
               <el-icon><Select /></el-icon>
               多选题
             </el-button>
+            <el-button size="small" @click="addQuestion('select')">
+              <el-icon><List /></el-icon>
+              下拉题
+            </el-button>
             <el-button size="small" @click="addQuestion('text')">
               <el-icon><Edit /></el-icon>
               文本题
@@ -96,10 +108,50 @@
               <el-icon><ChatLineSquare /></el-icon>
               多行文本
             </el-button>
+            <el-button size="small" @click="addQuestion('date')">
+              <el-icon><Calendar /></el-icon>
+              日期题
+            </el-button>
+            <el-button size="small" @click="addQuestion('rating')">
+              <el-icon><Star /></el-icon>
+              量表题
+            </el-button>
+            <el-button size="small" @click="addQuestion('description')">
+              <el-icon><Document /></el-icon>
+              说明文本
+            </el-button>
           </div>
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="saveAsTemplateDialogVisible" title="保存为模板" width="500px">
+      <el-form :model="templateForm" label-width="80px">
+        <el-form-item label="模板名称">
+          <el-input v-model="templateForm.name" placeholder="请输入模板名称" />
+        </el-form-item>
+        <el-form-item label="模板描述">
+          <el-input v-model="templateForm.description" type="textarea" :rows="2" placeholder="请输入模板描述（选填）" />
+        </el-form-item>
+        <el-form-item label="模板分类">
+          <el-select v-model="templateForm.category" style="width: 100%">
+            <el-option label="调研问卷" value="survey" />
+            <el-option label="报名登记" value="sign" />
+            <el-option label="反馈收集" value="feedback" />
+            <el-option label="测评评估" value="evaluation" />
+            <el-option label="自定义" value="custom" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="公开模板">
+          <el-switch v-model="templateForm.is_public" active-text="是" inactive-text="否" />
+          <span style="color: #909399; font-size: 12px; margin-left: 12px;">公开后其他用户可以看到和使用此模板</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="saveAsTemplateDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmSaveAsTemplate">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -115,17 +167,31 @@ import {
   CreditCard,
   Select,
   Edit,
-  ChatLineSquare
+  ChatLineSquare,
+  List,
+  Calendar,
+  Star,
+  Document,
+  Collection,
+  Setting
 } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
 import QuestionTypePanel from '@/components/QuestionTypePanel.vue'
 import QuestionItem from '@/components/QuestionItem.vue'
-import { getQuestionnaireDetail, updateQuestionnaire } from '@/api/questionnaire'
+import { getQuestionnaireDetail, updateQuestionnaire, saveQuestionnaireAsTemplate } from '@/api/questionnaire'
 
 const route = useRoute()
 const router = useRouter()
 
 const saving = ref(false)
+const saveAsTemplateDialogVisible = ref(false)
+const templateForm = reactive({
+  name: '',
+  description: '',
+  category: 'custom',
+  is_public: false
+})
+
 const questionnaire = reactive({
   id: '',
   title: '',
@@ -146,8 +212,17 @@ const createQuestion = (type) => {
     placeholder: ''
   }
 
-  if (type === 'radio' || type === 'checkbox') {
+  if (type === 'radio' || type === 'checkbox' || type === 'select') {
     baseQuestion.options = ['选项1', '选项2']
+  } else if (type === 'rating') {
+    baseQuestion.options = { max: 5, showScore: false }
+    baseQuestion.title = '请为以下项目评分'
+  } else if (type === 'date') {
+    baseQuestion.dateType = 'date'
+    baseQuestion.title = '请选择日期'
+  } else if (type === 'description') {
+    baseQuestion.title = '这里是说明文本内容'
+    baseQuestion.required = false
   }
 
   return baseQuestion
@@ -246,6 +321,38 @@ const handleSave = async () => {
 
 const handlePreview = () => {
   router.push(`/questionnaire/preview/${questionnaire.id}`)
+}
+
+const handleSaveAsTemplate = () => {
+  templateForm.name = questionnaire.title + ' 模板'
+  templateForm.description = questionnaire.description
+  saveAsTemplateDialogVisible.value = true
+}
+
+const confirmSaveAsTemplate = async () => {
+  if (!templateForm.name.trim()) {
+    ElMessage.warning('请输入模板名称')
+    return
+  }
+
+  try {
+    const res = await saveQuestionnaireAsTemplate(questionnaire.id, {
+      name: templateForm.name,
+      description: templateForm.description,
+      category: templateForm.category,
+      is_public: templateForm.is_public
+    })
+    if (res.code === 200) {
+      ElMessage.success('保存为模板成功')
+      saveAsTemplateDialogVisible.value = false
+    }
+  } catch (error) {
+    console.error('Save as template error:', error)
+  }
+}
+
+const handleAdvancedSettings = () => {
+  router.push(`/questionnaire/settings/${questionnaire.id}`)
 }
 
 const handleBack = () => {

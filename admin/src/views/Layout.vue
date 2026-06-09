@@ -16,6 +16,10 @@
           <el-icon><Menu /></el-icon>
           <span>问卷列表</span>
         </el-menu-item>
+        <el-menu-item index="/template">
+          <el-icon><Collection /></el-icon>
+          <span>模板管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -66,7 +70,7 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { ElMessageBox } from 'element-plus'
-import { Document, Menu, Fold, Expand, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
+import { Document, Menu, Fold, Expand, ArrowDown, SwitchButton, Collection } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -77,6 +81,9 @@ const collapse = ref(false)
 const activeMenu = computed(() => {
   if (route.path.startsWith('/questionnaire')) {
     return '/questionnaire'
+  }
+  if (route.path.startsWith('/template')) {
+    return '/template'
   }
   return route.path
 })

@@ -15,6 +15,25 @@
             <el-icon><List /></el-icon>
             查看记录
           </el-button>
+          <el-dropdown @command="handleExport" trigger="click">
+            <el-button type="success">
+              <el-icon><Download /></el-icon>
+              导出数据
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="xlsx">
+                  <el-icon><Document /></el-icon>
+                  导出 Excel
+                </el-dropdown-item>
+                <el-dropdown-item command="csv">
+                  <el-icon><Tickets /></el-icon>
+                  导出 CSV
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
     </div>
@@ -24,19 +43,70 @@
         <div class="question-header">
           <h3 class="question-title">
             Q{{ qIndex + 1 }}. {{ question.title }}
-            <el-tag size="small" :type="question.type === 'radio' ? '' : 'warning'">
-              {{ question.type === 'radio' ? '单选' : question.type === 'checkbox' ? '多选' : '文本题' }}
+            <el-tag size="small" :type="getTypeTagType(question.type)">
+              {{ getTypeLabel(question.type) }}
+            </el-tag>
+            <el-tag v-if="question.average !== undefined" type="success" size="small" class="ml-10">
+              平均分: {{ question.average }}
             </el-tag>
           </h3>
         </div>
 
-        <div v-if="question.type === 'radio' || question.type === 'checkbox'" class="chart-container">
+        <div v-if="['radio', 'checkbox', 'select'].includes(question.type)" class="chart-container">
           <div :ref="el => setPieChartRef(el, qIndex)" class="pie-chart"></div>
           <div :ref="el => setBarChartRef(el, qIndex)" class="bar-chart"></div>
         </div>
 
+        <div v-else-if="question.type === 'rating'" class="rating-stats">
+          <div class="rating-summary">
+            <div class="rating-average">
+              <span class="average-value">{{ question.average || 0 }}</span>
+              <span class="average-label">平均分</span>
+            </div>
+            <div :ref="el => setBarChartRef(el, qIndex)" class="rating-chart"></div>
+          </div>
+          <div class="rating-detail">
+            <div v-for="opt in question.options" :key="opt.rating" class="rating-item">
+              <span class="rating-label">{{ opt.rating }} 分</span>
+              <div class="rating-bar">
+                <div class="rating-bar-inner" :style="{ width: opt.percentage + '%' }"></div>
+              </div>
+              <span class="rating-count">{{ opt.count }} 人 ({{ opt.percentage }}%)</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="question.type === 'date'" class="date-stats">
+          <div :ref="el => setBarChartRef(el, qIndex)" class="date-chart"></div>
+          <el-table :data="question.dateStats || []" stripe size="small">
+            <el-table-column prop="date" label="日期" width="150" />
+            <el-table-column prop="count" label="选择人数" width="120" />
+            <el-table-column prop="percentage" label="占比" width="120">
+              <template #default="{ row }">{{ row.percentage }}%</template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div v-else-if="question.type === 'description'" class="description-stats">
+          <el-empty description="说明文本无需统计" :image-size="80" />
+        </div>
+
         <div v-else class="text-responses">
           <h4 class="responses-title">回答列表</h4>
+          <div v-if="question.topWords && question.topWords.length > 0" class="word-cloud">
+            <h5 class="word-title">高频词云</h5>
+            <div class="word-tags">
+              <el-tag 
+                v-for="word in question.topWords" 
+                :key="word.word"
+                :type="getWordTagType(word.count)"
+                size="small"
+                class="word-tag"
+              >
+                {{ word.word }} ({{ word.count }})
+              </el-tag>
+            </div>
+          </div>
           <el-table :data="question.responses || []" stripe>
             <el-table-column type="index" label="序号" width="80" />
             <el-table-column prop="value" label="回答内容" min-width="300" show-overflow-tooltip />
@@ -54,9 +124,11 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, List } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { ArrowLeft, List, Download, ArrowDown, Document, Tickets } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { getQuestionnaireStats, getQuestionnaireDetail } from '@/api/questionnaire'
+import { exportResponses } from '@/api/response'
 
 const route = useRoute()
 const router = useRouter()
@@ -86,6 +158,62 @@ const setPieChartRef = (el, index) => {
 const setBarChartRef = (el, index) => {
   if (el) {
     barChartRefs.value[index] = el
+  }
+}
+
+const getTypeLabel = (type) => {
+  const labels = {
+    radio: '单选',
+    checkbox: '多选',
+    select: '下拉',
+    text: '文本题',
+    textarea: '多行文本',
+    date: '日期',
+    rating: '量表',
+    description: '说明文本'
+  }
+  return labels[type] || type
+}
+
+const getTypeTagType = (type) => {
+  const types = {
+    radio: '',
+    checkbox: 'warning',
+    select: 'info',
+    text: 'success',
+    textarea: 'danger',
+    date: '',
+    rating: 'warning',
+    description: 'info'
+  }
+  return types[type] || ''
+}
+
+const getWordTagType = (count) => {
+  if (count >= 10) return 'danger'
+  if (count >= 5) return 'warning'
+  if (count >= 3) return 'primary'
+  return 'info'
+}
+
+const handleExport = async (format) => {
+  try {
+    const id = route.params.id
+    const response = await exportResponses(id, format)
+    
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `${questionnaire.title}_填写记录.${format}`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    
+    ElMessage.success('导出成功')
+  } catch (error) {
+    console.error('Export error:', error)
+    ElMessage.error('导出失败')
   }
 }
 
@@ -227,6 +355,10 @@ const fetchStats = async () => {
         title: s.questionTitle,
         type: s.type,
         options: s.options,
+        average: s.average,
+        validCount: s.validCount,
+        dateStats: s.dateStats,
+        topWords: s.topWords,
         responses: s.answers?.map((a, idx) => ({
           value: a,
           createdAt: '-'
@@ -236,13 +368,27 @@ const fetchStats = async () => {
       await nextTick()
 
       stats.questions.forEach((question, index) => {
-        if (question.type === 'radio' || question.type === 'checkbox') {
+        if (['radio', 'checkbox', 'select'].includes(question.type)) {
           const chartData = question.options?.map(opt => ({
             name: opt.option,
             count: opt.count || 0
           })) || []
 
           initPieChart(index, chartData)
+          initBarChart(index, chartData)
+        } else if (question.type === 'rating') {
+          const chartData = question.options?.map(opt => ({
+            name: `${opt.rating}分`,
+            count: opt.count || 0
+          })) || []
+
+          initBarChart(index, chartData)
+        } else if (question.type === 'date') {
+          const chartData = question.dateStats?.map(d => ({
+            name: d.date,
+            count: d.count || 0
+          })) || []
+
           initBarChart(index, chartData)
         }
       })
@@ -325,6 +471,119 @@ onBeforeUnmount(() => {
       font-size: 14px;
       color: #666;
     }
+
+    .word-cloud {
+      margin-bottom: 20px;
+      padding: 16px;
+      background: #f5f7fa;
+      border-radius: 8px;
+
+      .word-title {
+        margin: 0 0 12px 0;
+        font-size: 14px;
+        color: #333;
+        font-weight: 500;
+      }
+
+      .word-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+
+        .word-tag {
+          cursor: default;
+        }
+      }
+    }
+  }
+
+  .rating-stats {
+    .rating-summary {
+      display: flex;
+      align-items: center;
+      gap: 40px;
+      margin-bottom: 24px;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 12px;
+      color: #fff;
+
+      .rating-average {
+        text-align: center;
+
+        .average-value {
+          display: block;
+          font-size: 48px;
+          font-weight: 700;
+          line-height: 1;
+        }
+
+        .average-label {
+          display: block;
+          font-size: 14px;
+          margin-top: 8px;
+          opacity: 0.9;
+        }
+      }
+
+      .rating-chart {
+        flex: 1;
+        height: 120px;
+      }
+    }
+
+    .rating-detail {
+      .rating-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+        gap: 16px;
+
+        .rating-label {
+          width: 60px;
+          flex-shrink: 0;
+          font-weight: 500;
+          color: #333;
+        }
+
+        .rating-bar {
+          flex: 1;
+          height: 20px;
+          background: #f0f0f0;
+          border-radius: 10px;
+          overflow: hidden;
+
+          .rating-bar-inner {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.3s ease;
+          }
+        }
+
+        .rating-count {
+          width: 120px;
+          flex-shrink: 0;
+          text-align: right;
+          color: #666;
+          font-size: 13px;
+        }
+      }
+    }
+  }
+
+  .date-stats {
+    .date-chart {
+      height: 250px;
+      margin-bottom: 20px;
+    }
+  }
+
+  .description-stats {
+    padding: 40px 0;
+  }
+
+  .ml-10 {
+    margin-left: 10px;
   }
 }
 </style>

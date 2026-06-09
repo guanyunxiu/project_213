@@ -7,6 +7,7 @@ const { apiLimiter } = require('./middleware/rateLimit');
 const userRoutes = require('./routes/user');
 const questionnaireRoutes = require('./routes/questionnaire');
 const responseRoutes = require('./routes/response');
+const templateRoutes = require('./routes/template');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +21,7 @@ app.use(apiLimiter);
 app.use('/api/user', userRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
 app.use('/api/response', responseRoutes);
+app.use('/api/template', templateRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ code: 200, message: '服务运行正常', timestamp: new Date().toISOString() });

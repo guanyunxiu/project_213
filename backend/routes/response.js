@@ -7,17 +7,24 @@ const XLSX = require('xlsx');
 
 const router = express.Router();
 
+function generateIdentity(req, questionnaireId) {
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'] || '';
+  const identity = `${questionnaireId}_${ip}_${userAgent}`;
+  return require('crypto').createHash('md5').update(identity).digest('hex');
+}
+
 router.post('/:id', preventDuplicateSubmit, async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     
     const { id } = req.params;
-    const { answers } = req.body;
+    const { answers, respondent_identity } = req.body;
     const ip = req.ip;
     
     const [questionnaires] = await connection.execute(
-      'SELECT id, status FROM questionnaires WHERE id = ?',
+      'SELECT * FROM questionnaires WHERE id = ?',
       [id]
     );
     
@@ -26,17 +33,68 @@ router.post('/:id', preventDuplicateSubmit, async (req, res) => {
       return res.status(404).json({ code: 404, message: '问卷不存在' });
     }
     
-    if (questionnaires[0].status !== 1) {
+    const questionnaire = questionnaires[0];
+    const now = new Date();
+    
+    if (questionnaire.status !== 1) {
       await connection.rollback();
       return res.status(400).json({ code: 400, message: '问卷已停用' });
     }
     
+    if (questionnaire.publish_at && new Date(questionnaire.publish_at) > now) {
+      await connection.rollback();
+      return res.status(403).json({ code: 403, message: '问卷尚未发布' });
+    }
+    
+    if (questionnaire.expire_at && new Date(questionnaire.expire_at) < now) {
+      await connection.rollback();
+      return res.status(403).json({ code: 403, message: '问卷已过期' });
+    }
+    
+    const identity = respondent_identity || generateIdentity(req, id);
+    
+    if (questionnaire.max_responses_per_user > 0) {
+      const [countResult] = await connection.execute(
+        'SELECT COUNT(*) as count FROM responses WHERE questionnaire_id = ? AND respondent_identity = ?',
+        [id, identity]
+      );
+      if (countResult[0].count >= questionnaire.max_responses_per_user) {
+        await connection.rollback();
+        return res.status(400).json({ code: 400, message: `您已达到最大填写次数（${questionnaire.max_responses_per_user}次）` });
+      }
+    }
+    
+    if (questionnaire.ip_limit === 1) {
+      const [ipCountResult] = await connection.execute(
+        'SELECT COUNT(*) as count FROM responses WHERE questionnaire_id = ? AND respondent_ip = ?',
+        [id, ip]
+      );
+      if (ipCountResult[0].count > 0) {
+        await connection.rollback();
+        return res.status(400).json({ code: 400, message: '该IP地址已提交过此问卷' });
+      }
+    }
+    
     const [questions] = await connection.execute(
-      'SELECT id, title, type, required, options FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
+      'SELECT id, title, type, required, options, jump_logic FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
       [id]
     );
     
+    const questionMap = {};
+    questions.forEach(q => {
+      questionMap[q.id] = q;
+      if (q.options && typeof q.options === 'string') {
+        try {
+          q.options = JSON.parse(q.options);
+        } catch (e) {
+          q.options = [];
+        }
+      }
+    });
+    
     for (const q of questions) {
+      if (q.type === 'description') continue;
+      
       if (q.required === 1) {
         const answer = answers[q.id];
         if (answer === undefined || answer === null || answer === '' || 
@@ -45,11 +103,23 @@ router.post('/:id', preventDuplicateSubmit, async (req, res) => {
           return res.status(400).json({ code: 400, message: `「${q.title}」为必填项` });
         }
       }
+      
+      if (q.type === 'rating') {
+        const answer = answers[q.id];
+        if (answer !== undefined && answer !== null && answer !== '') {
+          const max = q.options?.max || 5;
+          const val = parseInt(answer);
+          if (isNaN(val) || val < 1 || val > max) {
+            await connection.rollback();
+            return res.status(400).json({ code: 400, message: `「${q.title}」评分值必须在1-${max}之间` });
+          }
+        }
+      }
     }
     
     const [responseResult] = await connection.execute(
-      'INSERT INTO responses (questionnaire_id, respondent_ip) VALUES (?, ?)',
-      [id, ip]
+      'INSERT INTO responses (questionnaire_id, respondent_ip, respondent_identity) VALUES (?, ?, ?)',
+      [id, ip, identity]
     );
     
     const responseId = responseResult.insertId;
@@ -80,7 +150,8 @@ router.post('/:id', preventDuplicateSubmit, async (req, res) => {
     
     res.json({
       code: 200,
-      message: '提交成功'
+      message: '提交成功',
+      data: { identity }
     });
   } catch (error) {
     await connection.rollback();
@@ -273,7 +344,7 @@ async function getResponseStats(id, userId) {
       }
     }
     
-    if (q.type === 'radio' || q.type === 'checkbox') {
+    if (q.type === 'radio' || q.type === 'checkbox' || q.type === 'select') {
       const [answers] = await pool.execute(
         'SELECT answer FROM response_answers WHERE question_id = ?',
         [q.id]
@@ -307,17 +378,95 @@ async function getResponseStats(id, userId) {
         options: optionStats,
         totalResponses: total
       });
+    } else if (q.type === 'rating') {
+      const [answers] = await pool.execute(
+        'SELECT answer FROM response_answers WHERE question_id = ? AND answer IS NOT NULL AND answer != ""',
+        [q.id]
+      );
+      
+      const maxRating = options?.max || 5;
+      const ratingStats = [];
+      let sum = 0;
+      let validCount = 0;
+      
+      for (let i = 1; i <= maxRating; i++) {
+        ratingStats.push({
+          rating: i,
+          count: 0,
+          percentage: 0
+        });
+      }
+      
+      answers.forEach(a => {
+        const val = parseInt(a.answer);
+        if (!isNaN(val) && val >= 1 && val <= maxRating) {
+          const idx = val - 1;
+          ratingStats[idx].count++;
+          sum += val;
+          validCount++;
+        }
+      });
+      
+      const total = responseCount[0].total;
+      ratingStats.forEach(rs => {
+        rs.percentage = total > 0 ? ((rs.count / total) * 100).toFixed(1) : 0;
+      });
+      
+      stats.push({
+        questionId: q.id,
+        questionTitle: q.title,
+        type: q.type,
+        options: ratingStats,
+        average: validCount > 0 ? (sum / validCount).toFixed(2) : 0,
+        totalResponses: total,
+        validCount
+      });
+    } else if (q.type === 'date') {
+      const [answers] = await pool.execute(
+        'SELECT answer, COUNT(*) as count FROM response_answers WHERE question_id = ? AND answer IS NOT NULL AND answer != "" GROUP BY answer ORDER BY answer',
+        [q.id]
+      );
+      
+      const dateStats = answers.map(a => ({
+        date: a.answer,
+        count: a.count,
+        percentage: responseCount[0].total > 0 ? ((a.count / responseCount[0].total) * 100).toFixed(1) : 0
+      }));
+      
+      stats.push({
+        questionId: q.id,
+        questionTitle: q.title,
+        type: q.type,
+        dateStats,
+        totalResponses: responseCount[0].total
+      });
+    } else if (q.type === 'description') {
     } else {
       const [answers] = await pool.execute(
         'SELECT answer FROM response_answers WHERE question_id = ? ORDER BY id DESC LIMIT 100',
         [q.id]
       );
       
+      const answerList = answers.map(a => a.answer).filter(a => a);
+      const wordCount = {};
+      answerList.forEach(text => {
+        const words = text.split(/[\s,，.。!！?？;；:：]+/).filter(w => w.length > 0);
+        words.forEach(w => {
+          wordCount[w] = (wordCount[w] || 0) + 1;
+        });
+      });
+      
+      const topWords = Object.entries(wordCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20)
+        .map(([word, count]) => ({ word, count }));
+      
       stats.push({
         questionId: q.id,
         questionTitle: q.title,
         type: q.type,
-        answers: answers.map(a => a.answer).filter(a => a),
+        answers: answerList,
+        topWords,
         totalResponses: responseCount[0].total
       });
     }
@@ -364,7 +513,7 @@ router.get('/questionnaire/:id/stats', authMiddleware, async (req, res) => {
   }
 });
 
-async function exportResponses(id, userId) {
+async function exportResponses(id, userId, format = 'xlsx') {
   const [questionnaires] = await pool.execute(
     'SELECT id, title FROM questionnaires WHERE id = ? AND user_id = ?',
     [id, userId]
@@ -375,12 +524,12 @@ async function exportResponses(id, userId) {
   }
   
   const [questions] = await pool.execute(
-    'SELECT id, title FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
+    'SELECT id, title, type FROM questions WHERE questionnaire_id = ? ORDER BY sort_order ASC',
     [id]
   );
   
   const [responses] = await pool.execute(
-    `SELECT r.id, r.submit_time,
+    `SELECT r.id, r.submit_time, r.respondent_ip,
      JSON_OBJECTAGG(ra.question_id, ra.answer) as answers
      FROM responses r
      LEFT JOIN response_answers ra ON r.id = ra.response_id
@@ -390,15 +539,26 @@ async function exportResponses(id, userId) {
     [id]
   );
   
-  const headers = ['序号', '提交时间', ...questions.map(q => q.title)];
+  const headers = ['序号', '提交时间', 'IP地址', ...questions.map(q => q.title)];
   const rows = responses.map((r, idx) => {
     const answers = JSON.parse(r.answers);
     return [
       idx + 1,
       r.submit_time,
+      r.respondent_ip,
       ...questions.map(q => answers[q.id] || '')
     ];
   });
+  
+  if (format === 'csv') {
+    const csvRows = [headers.join(','), ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))];
+    const csvContent = '\uFEFF' + csvRows.join('\n');
+    return {
+      data: Buffer.from(csvContent, 'utf-8'),
+      title: questionnaires[0].title,
+      type: 'csv'
+    };
+  }
   
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
@@ -408,21 +568,28 @@ async function exportResponses(id, userId) {
   
   return {
     data: buffer,
-    title: questionnaires[0].title
+    title: questionnaires[0].title,
+    type: 'xlsx'
   };
 }
 
 router.get('/:id/export', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await exportResponses(id, req.user.id);
+    const format = req.query.format || 'xlsx';
+    const result = await exportResponses(id, req.user.id, format);
     
     if (result.error) {
       return res.status(result.status).json({ code: result.status, message: result.error });
     }
     
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.title)}_填写记录.xlsx"`);
+    if (result.type === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.title)}_填写记录.csv"`);
+    } else {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.title)}_填写记录.xlsx"`);
+    }
     
     res.send(result.data);
   } catch (error) {
@@ -434,14 +601,20 @@ router.get('/:id/export', authMiddleware, async (req, res) => {
 router.get('/questionnaire/:id/export', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await exportResponses(id, req.user.id);
+    const format = req.query.format || 'xlsx';
+    const result = await exportResponses(id, req.user.id, format);
     
     if (result.error) {
       return res.status(result.status).json({ code: result.status, message: result.error });
     }
     
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.title)}_填写记录.xlsx"`);
+    if (result.type === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.title)}_填写记录.csv"`);
+    } else {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.title)}_填写记录.xlsx"`);
+    }
     
     res.send(result.data);
   } catch (error) {

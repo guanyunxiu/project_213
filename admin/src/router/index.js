@@ -43,6 +43,18 @@ const routes = [
         name: 'ResponseList',
         component: () => import('@/views/ResponseList.vue'),
         meta: { title: '填写记录' }
+      },
+      {
+        path: 'questionnaire/settings/:id',
+        name: 'QuestionnaireSettings',
+        component: () => import('@/views/QuestionnaireSettings.vue'),
+        meta: { title: '高级设置' }
+      },
+      {
+        path: 'template',
+        name: 'TemplateList',
+        component: () => import('@/views/TemplateList.vue'),
+        meta: { title: '模板管理' }
       }
     ]
   }

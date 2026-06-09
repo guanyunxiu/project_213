@@ -1,5 +1,13 @@
 import request from '../utils/request'
 
+export const verifyQuestionnaireAccess = (id, data) => {
+  return request({
+    url: `/questionnaire/public/${id}/verify`,
+    method: 'post',
+    data
+  })
+}
+
 export const getPublicQuestionnaire = (id) => {
   return request({
     url: `/questionnaire/public/${id}`,

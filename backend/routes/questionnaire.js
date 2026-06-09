@@ -107,6 +107,13 @@ router.get('/:id', authMiddleware, async (req, res) => {
           q.options = [];
         }
       }
+      if (q.jump_logic && typeof q.jump_logic === 'string') {
+        try {
+          q.jump_logic = JSON.parse(q.jump_logic);
+        } catch (e) {
+          q.jump_logic = null;
+        }
+      }
     });
     
     res.json({
@@ -125,7 +132,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, status, questions } = req.body;
+    const { title, description, status, questions, publish_at, expire_at, access_type, password, max_responses_per_user, ip_limit } = req.body;
     const userId = req.user.id;
     
     const [questionnaires] = await pool.execute(
@@ -137,7 +144,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ code: 404, message: '问卷不存在' });
     }
     
-    if (title !== undefined || description !== undefined || status !== undefined) {
+    const hasBasicUpdate = title !== undefined || description !== undefined || status !== undefined || 
+      publish_at !== undefined || expire_at !== undefined || access_type !== undefined || 
+      password !== undefined || max_responses_per_user !== undefined || ip_limit !== undefined;
+    
+    if (hasBasicUpdate) {
       const updateFields = [];
       const updateValues = [];
       
@@ -153,6 +164,30 @@ router.put('/:id', authMiddleware, async (req, res) => {
         updateFields.push('status = ?');
         updateValues.push(status);
       }
+      if (publish_at !== undefined) {
+        updateFields.push('publish_at = ?');
+        updateValues.push(publish_at || null);
+      }
+      if (expire_at !== undefined) {
+        updateFields.push('expire_at = ?');
+        updateValues.push(expire_at || null);
+      }
+      if (access_type !== undefined) {
+        updateFields.push('access_type = ?');
+        updateValues.push(access_type || 'public');
+      }
+      if (password !== undefined) {
+        updateFields.push('password = ?');
+        updateValues.push(password || null);
+      }
+      if (max_responses_per_user !== undefined) {
+        updateFields.push('max_responses_per_user = ?');
+        updateValues.push(max_responses_per_user || 0);
+      }
+      if (ip_limit !== undefined) {
+        updateFields.push('ip_limit = ?');
+        updateValues.push(ip_limit ? 1 : 0);
+      }
       
       updateValues.push(id);
       await pool.execute(
@@ -167,14 +202,15 @@ router.put('/:id', authMiddleware, async (req, res) => {
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         await pool.execute(
-          'INSERT INTO questions (questionnaire_id, title, type, options, required, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO questions (questionnaire_id, title, type, options, required, sort_order, jump_logic) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [
             id,
             q.title,
             q.type,
             q.options ? JSON.stringify(q.options) : null,
             q.required ? 1 : 0,
-            i
+            i,
+            q.jump_logic ? JSON.stringify(q.jump_logic) : null
           ]
         );
       }
@@ -350,6 +386,48 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   }
 });
 
+router.post('/public/:id/verify', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+    
+    const [questionnaires] = await pool.execute(
+      'SELECT * FROM questionnaires WHERE id = ? AND status = 1',
+      [id]
+    );
+    
+    if (questionnaires.length === 0) {
+      return res.status(404).json({ code: 404, message: '问卷不存在或已停用' });
+    }
+    
+    const questionnaire = questionnaires[0];
+    const now = new Date();
+    
+    if (questionnaire.publish_at && new Date(questionnaire.publish_at) > now) {
+      return res.status(403).json({ code: 403, message: '问卷尚未发布' });
+    }
+    
+    if (questionnaire.expire_at && new Date(questionnaire.expire_at) < now) {
+      return res.status(403).json({ code: 403, message: '问卷已过期' });
+    }
+    
+    if (questionnaire.access_type === 'password') {
+      if (!password || password !== questionnaire.password) {
+        return res.status(401).json({ code: 401, message: '密码错误', requirePassword: true });
+      }
+    }
+    
+    res.json({
+      code: 200,
+      message: '验证成功',
+      data: { requirePassword: questionnaire.access_type === 'password' }
+    });
+  } catch (error) {
+    console.error('Verify questionnaire access error:', error);
+    res.status(500).json({ code: 500, message: '验证失败' });
+  }
+});
+
 router.get('/public/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -361,6 +439,17 @@ router.get('/public/:id', async (req, res) => {
     
     if (questionnaires.length === 0) {
       return res.status(404).json({ code: 404, message: '问卷不存在或已停用' });
+    }
+    
+    const questionnaire = questionnaires[0];
+    const now = new Date();
+    
+    if (questionnaire.publish_at && new Date(questionnaire.publish_at) > now) {
+      return res.status(403).json({ code: 403, message: '问卷尚未发布' });
+    }
+    
+    if (questionnaire.expire_at && new Date(questionnaire.expire_at) < now) {
+      return res.status(403).json({ code: 403, message: '问卷已过期' });
     }
     
     const [questions] = await pool.execute(
@@ -378,18 +467,120 @@ router.get('/public/:id', async (req, res) => {
           q.options = [];
         }
       }
+      if (q.jump_logic && typeof q.jump_logic === 'string') {
+        try {
+          q.jump_logic = JSON.parse(q.jump_logic);
+        } catch (e) {
+          q.jump_logic = null;
+        }
+      }
     });
     
     res.json({
       code: 200,
       data: {
-        questionnaire: questionnaires[0],
+        questionnaire: {
+          id: questionnaire.id,
+          title: questionnaire.title,
+          description: questionnaire.description,
+          access_type: questionnaire.access_type,
+          max_responses_per_user: questionnaire.max_responses_per_user,
+          ip_limit: questionnaire.ip_limit
+        },
         questions
       }
     });
   } catch (error) {
     console.error('Get public questionnaire error:', error);
     res.status(500).json({ code: 500, message: '获取问卷失败' });
+  }
+});
+
+router.get('/:id/settings', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    
+    const [questionnaires] = await pool.execute(
+      'SELECT * FROM questionnaires WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+    
+    if (questionnaires.length === 0) {
+      return res.status(404).json({ code: 404, message: '问卷不存在' });
+    }
+    
+    res.json({
+      code: 200,
+      data: questionnaires[0]
+    });
+  } catch (error) {
+    console.error('Get questionnaire settings error:', error);
+    res.status(500).json({ code: 500, message: '获取问卷设置失败' });
+  }
+});
+
+router.put('/:id/settings', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const { publish_at, expire_at, access_type, password, max_responses_per_user, ip_limit, status } = req.body;
+    
+    const [questionnaires] = await pool.execute(
+      'SELECT id FROM questionnaires WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+    
+    if (questionnaires.length === 0) {
+      return res.status(404).json({ code: 404, message: '问卷不存在' });
+    }
+    
+    const updateFields = [];
+    const updateValues = [];
+    
+    if (publish_at !== undefined) {
+      updateFields.push('publish_at = ?');
+      updateValues.push(publish_at || null);
+    }
+    if (expire_at !== undefined) {
+      updateFields.push('expire_at = ?');
+      updateValues.push(expire_at || null);
+    }
+    if (access_type !== undefined) {
+      updateFields.push('access_type = ?');
+      updateValues.push(access_type || 'public');
+    }
+    if (password !== undefined) {
+      updateFields.push('password = ?');
+      updateValues.push(password || null);
+    }
+    if (max_responses_per_user !== undefined) {
+      updateFields.push('max_responses_per_user = ?');
+      updateValues.push(max_responses_per_user || 0);
+    }
+    if (ip_limit !== undefined) {
+      updateFields.push('ip_limit = ?');
+      updateValues.push(ip_limit ? 1 : 0);
+    }
+    if (status !== undefined) {
+      updateFields.push('status = ?');
+      updateValues.push(status ? 1 : 0);
+    }
+    
+    updateValues.push(id);
+    
+    await pool.execute(
+      `UPDATE questionnaires SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateValues
+    );
+    
+    res.json({
+      code: 200,
+      message: '设置更新成功'
+    });
+  } catch (error) {
+    console.error('Update questionnaire settings error:', error);
+    res.status(500).json({ code: 500, message: '更新问卷设置失败' });
   }
 });
 
